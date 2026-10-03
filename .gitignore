@@ -1,0 +1,7 @@
+bin/
+obj/
+.vs/
+.github/appmod/
+desktop.ini
+*.plugin
+*.user

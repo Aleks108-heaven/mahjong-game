@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore Tests/TestMahjongGame.Tests.csproj
+
+      - name: Build
+        run: dotnet build Tests/TestMahjongGame.Tests.csproj --no-restore -c Release
+
+      - name: Test
+        run: dotnet test Tests/TestMahjongGame.Tests.csproj --no-build -c Release
+
+      - name: Smoke run (seeded round)
+        run: dotnet run --project TestMahjongGame.csproj -c Release -- 7 | tail -n 5
