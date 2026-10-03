@@ -2,19 +2,44 @@
 
 A riichi mahjong engine in C# (.NET 10) with a console simulation: four bot players play one round against each other.
 
-> **Status: engine prototype.** The wall, dealing, turn flow, shanten maths, tsumo and ron work. Calls, riichi, yaku, scoring and a UI are not built yet (see [Roadmap](#roadmap)).
+> **Status: engine prototype with a desktop viewer.** The wall, dealing, turn flow, shanten maths, tsumo and ron work, and a Windows app shows four bots playing a round. You can't play a tile yourself yet, and calls, riichi, yaku and scoring are not built (see [Roadmap](#roadmap)).
 
 ## Run it
 
-Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download). The desktop app needs Windows.
 
 ```powershell
-dotnet run                 # random round
-dotnet run -- 7            # reproducible round (seed 7)
-dotnet test Tests          # run the test suite
+Play.cmd                                     # desktop app (double-click it, or run it)
+dotnet run --project Wpf\MahjongTable.csproj # same, without the batch file
+dotnet run                                   # console version, random round
+dotnet run -- 7                              # console version, reproducible round (seed 7)
+dotnet test Tests                            # run the test suite
 ```
 
-A non-integer seed prints a usage message and exits with code 1.
+A non-integer seed in the console version prints a usage message and exits with code 1.
+
+## Desktop app (Mahjong Table)
+
+A WPF window in [Wpf/](Wpf/) that draws the round on a green table: four player panels with each hand, shanten and discard river, plus a control sidebar and the game log.
+
+| Control | What it does |
+|---|---|
+| **Next turn** (`→`) | Plays one full turn: draw, tsumo check, discard, ron check |
+| **Auto-play** (`A`) | Plays turns by itself; the slider sets 100-1500 ms per turn |
+| **New round** (`N`) | Deals again. A whole-number seed replays the same round; empty means random. |
+| **Show all hands** | Untick to turn every hand face-down |
+| **Game log** | The same text the console version prints |
+
+On screen:
+
+- The player whose draw is next gets a white outline and a "Draws next" label.
+- The last discard has an orange outline.
+- A win turns the panel gold, marks the winning tile on a ron, and shows a result banner. Next turn and Auto-play are then disabled.
+- Tiles show the suit as a glyph (萬 characters, 筒 circles, 索 bamboo) as well as by colour, and each tile has a tooltip such as "1 of bamboo (1s)".
+- The layout is drawn at a fixed size and scaled, so it fits small and large windows.
+- Keyboard focus is shown with a thick white border.
+
+Developer shortcut: `MahjongTable.exe <seed> <turns>` opens the app with a seed and plays that many turns first.
 
 ### Example output (seed 7)
 
@@ -52,27 +77,33 @@ Standard riichi notation:
 | [Engine/PlayerHand.cs](Engine/PlayerHand.cs) | Hand storage, shanten, win checks, shanten-minimising discard |
 | [Engine/ShantenCalculator.cs](Engine/ShantenCalculator.cs) | Shanten for standard hands, seven pairs and thirteen orphans. `-1` means complete. |
 | [Engine/TurnState.cs](Engine/TurnState.cs) | `Draw` > `ActionPhase` > `Discard` > `WaitPhase` > `NextPlayer` |
-| [Engine/GameEngine.cs](Engine/GameEngine.cs) | Round loop, tsumo and ron, output through a `TextWriter` |
+| [Engine/GameEngine.cs](Engine/GameEngine.cs) | Round state machine with `StartRound()`, `PlayTurn()` and `RunSimulation()`. Raises a `Logged` event and writes to a `TextWriter`. |
 | [Program.cs](Program.cs) | Console entry point |
+| [Wpf/MainWindow.xaml(.cs)](Wpf/MainWindow.xaml) | Table layout, controls and the refresh logic |
+| [Wpf/TileView.cs](Wpf/TileView.cs) | Draws one tile, face-up or face-down, with an optional highlight |
 
 Notes:
 
 - **Bots** discard the tile that leaves the lowest shanten (ties random). They win far more often than real players, about 70% of seeded rounds in testing.
 - **Reproducibility:** `new GameEngine(seed, writer)` makes a round repeatable and lets tests capture output.
-- **Turn flow:** the wall is checked only when a turn starts, so every turn that begins finishes. A full exhaustive round is 70 draws and 70 discards.
+- **Turn flow:** the wall is checked only when a turn starts, so every turn that begins finishes. A full exhaustive round is 70 draws and 70 discards, and the round ends as soon as turn 70 finishes.
+- **Stepping:** `PlayTurn()` plays one turn and `RunSimulation()` plays the whole round; both give the same result for the same seed.
 - **Ron** is checked in turn order from the discarder's left.
 
 ## Tests
 
-26 xunit tests in [Tests/](Tests/) cover:
+33 xunit tests in [Tests/](Tests/) cover:
 
 - tile validation, equality and notation
 - shanten for known hands in all three shapes
 - wall composition (136 tiles, 4 of each, 122/14 split)
 - tsumo/ron detection and seed reproducibility
 - turn completion over 200 seeds
+- the step API: one turn at a time, round end after turn 70, reset on a new round, the `Logged` event, and stepping matching a full run
 
-CI runs build and tests on every push and pull request ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
+The window itself has no automated tests; it was checked by running it and looking at screenshots of the start, middle, ron win and exhaustive draw.
+
+CI runs on every push and pull request ([.github/workflows/ci.yml](.github/workflows/ci.yml)): build, tests and a smoke run on Ubuntu, and a build of the desktop app on Windows.
 
 ## QA and design review
 
@@ -98,4 +129,5 @@ Known limits: shanten was checked on a handful of hands, not against a full refe
 - Calls: chi, pon, kan (uses the dead wall)
 - Riichi, yaku, dora and scoring
 - Rounds, dealer rotation and winds
-- A GUI on top of the engine
+- Let a human take a seat: the engine must wait for a discard choice, then the window needs click-to-discard
+- Animations and sound in the desktop app

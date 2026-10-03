@@ -204,6 +204,127 @@ public class HandTests
     }
 }
 
+public class StepApiTests
+{
+    private static GameEngine NewEngine(int seed) => new(seed, TextWriter.Null);
+
+    [Fact]
+    public void PlayTurn_BeforeStartRound_Throws()
+    {
+        Assert.Throws<InvalidOperationException>(() => NewEngine(1).PlayTurn());
+    }
+
+    [Fact]
+    public void PlayTurn_AdvancesExactlyOneTurnAndOneDiscard()
+    {
+        var engine = NewEngine(1);
+        engine.StartRound();
+        Assert.Equal(0, engine.Turns);
+        Assert.Equal(70, engine.WallRemaining);
+
+        engine.PlayTurn();
+
+        if (!engine.IsFinished)
+        {
+            Assert.Equal(1, engine.Turns);
+            Assert.Equal(69, engine.WallRemaining);
+            Assert.Single(engine.Discards);
+            Assert.Single(engine.Players[0].Discards);
+            Assert.Equal(1, engine.CurrentSeat);
+        }
+    }
+
+    [Fact]
+    public void RoundIsFinishedAsSoonAsTheLastTurnEnds()
+    {
+        for (var seed = 0; seed < 300; seed++)
+        {
+            var engine = NewEngine(seed);
+            engine.StartRound();
+            while (!engine.IsFinished)
+            {
+                engine.PlayTurn();
+            }
+
+            if (engine.Result!.Outcome != RoundOutcome.ExhaustiveDraw)
+            {
+                continue;
+            }
+
+            // No extra "failed draw" turn is needed: the round ends right after turn 70.
+            Assert.Equal(70, engine.Turns);
+            Assert.Equal(0, engine.WallRemaining);
+            return;
+        }
+
+        Assert.Fail("No exhaustive draw found in 300 seeds.");
+    }
+
+    [Fact]
+    public void PlayTurn_IsNoOpAfterRoundEnds()
+    {
+        var engine = NewEngine(3);
+        engine.StartRound();
+        while (!engine.IsFinished)
+        {
+            engine.PlayTurn();
+        }
+
+        var turns = engine.Turns;
+        engine.PlayTurn();
+        Assert.Equal(turns, engine.Turns);
+    }
+
+    [Fact]
+    public void StartRound_ResetsStateForANewRound()
+    {
+        var engine = NewEngine(5);
+        engine.StartRound();
+        while (!engine.IsFinished)
+        {
+            engine.PlayTurn();
+        }
+
+        engine.StartRound();
+
+        Assert.False(engine.IsFinished);
+        Assert.Null(engine.Result);
+        Assert.Equal(0, engine.Turns);
+        Assert.Empty(engine.Discards);
+        Assert.All(engine.Players, p => Assert.Equal(13, p.Hand.Tiles.Count));
+        Assert.All(engine.Players, p => Assert.Empty(p.Discards));
+    }
+
+    [Fact]
+    public void Logged_RaisesTheSameLinesThatAreWritten()
+    {
+        var writer = new StringWriter();
+        var engine = new GameEngine(9, writer);
+        var lines = new List<string>();
+        engine.Logged += lines.Add;
+
+        engine.RunSimulation();
+
+        Assert.Equal(writer.ToString(), string.Join(string.Empty, lines.Select(l => l + writer.NewLine)));
+    }
+
+    [Fact]
+    public void SteppingMatchesRunSimulation()
+    {
+        var full = new StringWriter();
+        var expected = new GameEngine(11, full).RunSimulation();
+
+        var stepped = NewEngine(11);
+        stepped.StartRound();
+        while (!stepped.IsFinished)
+        {
+            stepped.PlayTurn();
+        }
+
+        Assert.Equal(expected, stepped.Result);
+    }
+}
+
 public class EngineTests
 {
     private static (RoundResult Result, string Log, GameEngine Engine) Run(int seed)

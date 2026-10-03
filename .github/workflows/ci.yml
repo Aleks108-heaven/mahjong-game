@@ -26,3 +26,15 @@ jobs:
 
       - name: Smoke run (seeded round)
         run: dotnet run --project TestMahjongGame.csproj -c Release -- 7 | tail -n 5
+
+  build-desktop-app:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build WPF app
+        run: dotnet build Wpf/MahjongTable.csproj -c Release

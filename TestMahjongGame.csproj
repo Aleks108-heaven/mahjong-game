@@ -8,9 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Tests\**" />
-    <EmbeddedResource Remove="Tests\**" />
-    <None Remove="Tests\**" />
+    <Compile Remove="Tests\**;Wpf\**" />
+    <EmbeddedResource Remove="Tests\**;Wpf\**" />
+    <None Remove="Tests\**;Wpf\**" />
   </ItemGroup>
 
 </Project>
