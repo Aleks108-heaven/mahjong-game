@@ -5,22 +5,34 @@ namespace TestMahjongGame.Engine;
 public sealed class ShantenCalculator
 {
     // Lowest shanten over all three winning shapes. -1 means the hand is complete.
-    public int CalculateShanten(int[] tileCounts)
+    // tileCounts holds only the concealed tiles; meldCount is the number of open melds (chi/pon).
+    // Seven pairs and thirteen orphans need a closed hand, so they only count when meldCount is 0.
+    public int CalculateShanten(int[] tileCounts, int meldCount = 0)
     {
+        var standard = CalculateStandardShanten(tileCounts, meldCount);
+        if (meldCount > 0)
+        {
+            return standard;
+        }
+
         return Math.Min(
-            CalculateStandardShanten(tileCounts),
+            standard,
             Math.Min(CalculateSevenPairsShanten(tileCounts), CalculateThirteenOrphansShanten(tileCounts)));
     }
 
-    public int CalculateStandardShanten(int[] tileCounts)
+    public int CalculateStandardShanten(int[] tileCounts, int meldCount = 0)
     {
         Validate(tileCounts);
+        if (meldCount < 0 || meldCount > 4)
+        {
+            throw new ArgumentOutOfRangeException(nameof(meldCount), meldCount, "meldCount must be between 0 and 4.");
+        }
 
         var counts = new int[34];
         Array.Copy(tileCounts, counts, 34);
         var minShanten = 8;
 
-        Search(counts, 0, 0, 0, 0, ref minShanten);
+        Search(counts, 0, meldCount, 0, 0, ref minShanten);
         return minShanten;
     }
 

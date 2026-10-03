@@ -2,7 +2,7 @@
 
 A riichi mahjong engine in C# (.NET 10) with a console simulation: four bot players play one round against each other.
 
-> **Status: playable prototype.** You can take a seat in the Windows app and discard against three bots, or just watch four bots play. The wall, dealing, turn flow, shanten maths, tsumo and ron work. Calls (chi, pon, kan), riichi, yaku and scoring are not built (see [Roadmap](#roadmap)).
+> **Status: playable prototype.** You can take a seat in the Windows app and discard against three bots, or just watch four bots play. The wall, dealing, turn flow, shanten maths, tsumo, ron and calls (pon and chi) work. Kan, riichi, yaku and scoring are not built (see [Roadmap](#roadmap)).
 
 ## Run it
 
@@ -30,7 +30,8 @@ Pick **East, South, West or North** under *Your seat* (East is the default) and 
 2. **Click a tile to discard it.** Tab to a tile and press Enter works too. Hovering a tile shows where discarding it leaves you, for example "Discard 5p: shanten 2".
 3. **Hint** (`H`) outlines the discards, in green, that keep you closest to winning, and says what shanten they keep.
 4. The bots then play their turns at the chosen speed, and the game stops again at your next move.
-5. A win is declared for you automatically: tsumo when your draw completes your hand, ron when a bot discards your winning tile. At the end of the round every hand is revealed.
+5. **Calls.** When a bot discards a tile you could use, the game pauses and asks. Choose **Pon** (P) to take it for a triplet, **Chi** (C, or the button for each possible run) to take it for a run, or **Pass** (S). Pass is the focused default, so a stray Enter never calls by accident. After a call you take the tile, it joins an open meld next to your hand, and you discard without drawing.
+6. A win is declared for you automatically: tsumo when your draw completes your hand, ron when a bot discards your winning tile. At the end of the round every hand is revealed.
 
 Other players' hands start face-down while you play (tick *Show all hands* to peek).
 
@@ -39,7 +40,8 @@ Other players' hands start face-down while you play (tick *Show all hands* to pe
 | Control | What it does |
 |---|---|
 | **Your seat** | Seat to play, or Watch to spectate. Changing it starts a new round. |
-| **Hint** (`H`) | Shows the best discards for your current hand |
+| **Hint** (H) | Shows the best discards for your current hand (locked tiles excluded) |
+| **Pon** (P) / **Chi** (C) / **Pass** (S) | Answer a call prompt |
 | **Next turn** (`→`) | Spectator only: plays one full turn (draw, tsumo check, discard, ron check) |
 | **Auto-play** (`A`) | Spectator only: plays turns by itself |
 | **Speed slider** | 100-1500 ms per turn (spectating) or per bot turn (playing) |
@@ -90,6 +92,7 @@ Standard riichi notation:
 | File | Role |
 |---|---|
 | [Engine/Tile.cs](Engine/Tile.cs) | Immutable tile with validation, value equality and a 0-33 index |
+| [Engine/Meld.cs](Engine/Meld.cs) | Open melds (chi/pon), chi options, call options for the human, and the swap-calling lock |
 | [Engine/Wall.cs](Engine/Wall.cs) | 136 tiles, Fisher-Yates shuffle, 122 live + 14 dead. The dead wall is reserved for kans and dora and not used yet. |
 | [Engine/PlayerHand.cs](Engine/PlayerHand.cs) | Hand storage, shanten, win checks, shanten-minimising discard |
 | [Engine/ShantenCalculator.cs](Engine/ShantenCalculator.cs) | Shanten for standard hands, seven pairs and thirteen orphans. `-1` means complete. |
@@ -107,10 +110,14 @@ Notes:
 - **Stepping:** `PlayTurn()` plays one turn and `RunSimulation()` plays the whole round; both give the same result for the same seed.
 - **Human seat:** `StartRound(seat)` hands one seat to a person. `PlayTurn()` then stops with `AwaitingHumanDiscard` true on that seat's 14-tile hand, and `DiscardHuman(tile)` resumes the round. `PlayerHand.SuggestDiscards()` and `ShantenAfterDiscard()` back the hint.
 - **Ron** is checked in turn order from the discarder's left.
+- **Calls:** after a discard, ron is checked first, then pon (any other seat), then chi (only the seat to the discarder's left). Bots call only when the call lowers their best reachable shanten. The last discard of the round can't be called. A called tile leaves the discarder's river and joins the caller's meld, and the caller discards without drawing.
+- **Swap-calling rule:** right after a call you can't discard the called tile, and after a chi you also can't discard the tile that would complete the same run from the other end (for example, after chi 3-4-5 on the 3, the 6 is locked). The window dims locked tiles and the engine rejects them.
+- **Open hands:** a meld counts as three tiles, so a hand is complete at 14 tiles counting melds. Seven pairs and thirteen orphans only count for closed hands.
+- **Human calls:** PlayTurn() also stops with AwaitingHumanCall true and a PendingCall describing what is possible; answer with HumanPon(), HumanChi(option) or HumanPass().
 
 ## Tests
 
-46 xunit tests in [Tests/](Tests/) cover:
+80 xunit tests in [Tests/](Tests/) cover:
 
 - tile validation, equality and notation
 - shanten for known hands in all three shapes
@@ -119,7 +126,10 @@ Notes:
 - turn completion over 200 seeds
 - the step API: one turn at a time, round end after turn 70, reset on a new round, the `Logged` event, and stepping matching a full run
 - the human seat: the engine pauses on your 14-tile hand, `PlayTurn` does nothing while it waits, bad or out-of-turn discards throw and leave the round waiting, and 100 full rounds with a human playing hint discards always finish
-- hints: the suggested discards agree with the shanten after each discard
+- hints: the suggested discards agree with the shanten after each discard, and never include locked tiles
+- calls: which pons and chis a hand can make (suit, edges of the suit, honours), meld contents, how melds count towards shanten, tenpai and winning, and the swap-calling lock for pon and chi at every position in the run
+- bots and rounds: calls happen regularly, melds are well formed (chi only from the player on the left), no tile is ever lost or duplicated over 300 rounds, nobody calls the last discard, and a human who takes every call still finishes every round
+- the human call prompt: only legal options are offered, the round pauses while it waits, pass leaves the hand alone, pon and chi take the tile and lock the discard, and illegal calls throw
 
 The window itself has no automated tests. It was checked by running it, driving it with the keyboard (Enter to discard, `H` for a hint) and looking at screenshots of the start, mid-game, a ron win and an exhaustive draw.
 
@@ -141,13 +151,14 @@ An initial review (source review plus runtime checks) found these issues, all no
 
 Design fixes: white/green/red dragons were `P`/`F`/`C`, easy to confuse with pinzu, and are now `5z`-`7z`. Output gained turn numbers, seat winds, the full hand and the wall count. Rendering goes through a `TextWriter`, so a UI can replace the console.
 
-Known limits: shanten was checked on a handful of hands, not against a full reference table. Ron ignores furiten, yaku and calls.
+Known limits: shanten was checked on a handful of hands, not against a full reference table. There is no yaku check, so any complete hand wins, including an open hand that real riichi would reject for having no yaku. Ron ignores furiten.
 
 ## Roadmap
 
 - Discard pile display and furiten
-- Calls: chi, pon, kan (uses the dead wall)
+- Kan (uses the dead wall), then dora
 - Riichi, yaku, dora and scoring
 - Rounds, dealer rotation and winds
 - Let the human choose whether to call tsumo or ron (both are automatic for now)
+- Show who called what in a short on-screen history, not only in the log
 - Animations and sound in the desktop app

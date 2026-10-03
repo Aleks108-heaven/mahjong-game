@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace TestMahjongGame.Engine;
 
@@ -21,21 +22,32 @@ public sealed class GameEngine
     private readonly TextWriter _output;
     private readonly List<Player> _players = new();
     private readonly List<Tile> _discards = new();
+    private List<Tile> _forbidden = new();
     private Wall _wall = null!;
     private int _currentPlayerIndex;
     private TurnState _state;
     private bool _started;
+    private bool _stepBreak;
 
     public IReadOnlyList<Player> Players => _players;
+
+    // Every tile thrown this round, in order, including ones that were later called.
     public IReadOnlyList<Tile> Discards => _discards;
 
     public bool IsFinished => Result is not null;
     public RoundResult? Result { get; private set; }
+
+    // Number of draws so far (calls do not add to it); a round has at most 70.
     public int Turns { get; private set; }
     public int WallRemaining => _started ? _wall.LiveCount : 0;
 
+    // How many pon/chi calls have been made this round.
+    public int CallCount { get; private set; }
+
     // Seat whose turn comes next (or who just won / just discarded last when the round ended).
     public int CurrentSeat => _currentPlayerIndex;
+
+    // The last tile thrown, until another player calls it (then both are null).
     public Tile? LastDiscard { get; private set; }
     public int? LastDiscardSeat { get; private set; }
     public Tile? WinningTile { get; private set; }
@@ -50,6 +62,18 @@ public sealed class GameEngine
     // True while the round is paused for the human to choose a discard (call DiscardHuman).
     public bool AwaitingHumanDiscard =>
         _started && !IsFinished && HumanSeat == _currentPlayerIndex && _state == TurnState.Discard;
+
+    // True while the round is paused for the human to call the last discard or pass.
+    public bool AwaitingHumanCall => _started && !IsFinished && _state == TurnState.CallDecision;
+
+    // True when the next step is a draw; false when the seat to act discards without drawing (after a call).
+    public bool NextActionIsDraw => _state == TurnState.Draw;
+
+    // What the human may call right now; null unless AwaitingHumanCall.
+    public CallOptions? PendingCall { get; private set; }
+
+    // Tiles the current player may not discard right after a call (swap-calling rule).
+    public IReadOnlyList<Tile> ForbiddenDiscards => _forbidden;
 
     // Raised for every log line, so a UI can show the same text the console prints.
     public event Action<string>? Logged;
@@ -79,7 +103,7 @@ public sealed class GameEngine
     }
 
     // Deals a fresh round. Safe to call again to start another round with the same random stream.
-    // Pass a seat (0-3) to let a person choose that seat's discards; the other seats stay bots.
+    // Pass a seat (0-3) to let a person choose that seat's discards and calls; the other seats stay bots.
     public void StartRound(int? humanSeat = null)
     {
         if (humanSeat is < 0 or > 3)
@@ -92,6 +116,9 @@ public sealed class GameEngine
         LastDrawSeat = null;
         _players.Clear();
         _discards.Clear();
+        _forbidden = new List<Tile>();
+        PendingCall = null;
+        CallCount = 0;
         for (var i = 0; i < 4; i++)
         {
             _players.Add(new Player(i));
@@ -109,7 +136,8 @@ public sealed class GameEngine
         _started = true;
     }
 
-    // Plays one complete turn: draw, tsumo check, discard, ron check. Does nothing once the round is over.
+    // Plays one step of the round: a draw and discard, or the discard that follows a call.
+    // Stops early when the human must discard or decide on a call. Does nothing once the round is over.
     public void PlayTurn()
     {
         if (!_started)
@@ -117,19 +145,15 @@ public sealed class GameEngine
             throw new InvalidOperationException("Call StartRound() first.");
         }
 
-        if (IsFinished || AwaitingHumanDiscard)
+        if (IsFinished || AwaitingHumanDiscard || AwaitingHumanCall)
         {
             return;
         }
 
-        do
-        {
-            Advance();
-        }
-        while (!IsFinished && _state != TurnState.Draw && !AwaitingHumanDiscard);
+        RunUntilPause(playAtLeastOnce: true);
     }
 
-    // The human throws a tile from their hand; the turn then finishes (ron check) and passes on.
+    // The human throws a tile from their hand; the turn then finishes (ron and call checks) and passes on.
     public void DiscardHuman(Tile tile)
     {
         if (!AwaitingHumanDiscard)
@@ -138,27 +162,101 @@ public sealed class GameEngine
         }
 
         var player = _players[_currentPlayerIndex];
-        if (!player.Hand.Remove(tile))
+        if (!player.Hand.Tiles.Contains(tile))
         {
             throw new ArgumentException("The hand does not contain that tile.", nameof(tile));
         }
 
-        CommitDiscard(player, tile);
-
-        while (!IsFinished && _state != TurnState.Draw)
+        if (!IsDiscardAllowed(tile))
         {
-            Advance();
+            throw new ArgumentException("That tile can't be discarded right after a call (swap-calling rule).", nameof(tile));
+        }
+
+        player.Hand.Remove(tile);
+        CommitDiscard(player, tile);
+        RunUntilPause(playAtLeastOnce: false);
+    }
+
+    // False for tiles barred by the swap-calling rule (unless nothing else is left in the hand).
+    public bool IsDiscardAllowed(Tile tile)
+    {
+        if (_forbidden.Count == 0 || !_forbidden.Contains(tile))
+        {
+            return true;
+        }
+
+        var hand = _players[_currentPlayerIndex].Hand;
+        return hand.Tiles.All(t => _forbidden.Contains(t));
+    }
+
+    // Discards that keep the human closest to winning, honouring the swap-calling rule.
+    public IReadOnlyList<Tile> SuggestHumanDiscards()
+    {
+        if (HumanSeat is null)
+        {
+            throw new InvalidOperationException("There is no human seat.");
+        }
+
+        return _players[HumanSeat.Value].Hand.SuggestDiscards(_forbidden);
+    }
+
+    public void HumanPon()
+    {
+        RequireCallDecision();
+        if (!PendingCall!.CanPon)
+        {
+            throw new InvalidOperationException("Pon is not available for this discard.");
+        }
+
+        ExecuteCall(_players[HumanSeat!.Value], MeldType.Pon, null);
+    }
+
+    public void HumanChi(ChiOption option)
+    {
+        RequireCallDecision();
+        if (!PendingCall!.ChiOptions.Contains(option))
+        {
+            throw new ArgumentException("That sequence is not available for this discard.", nameof(option));
+        }
+
+        ExecuteCall(_players[HumanSeat!.Value], MeldType.Chi, option);
+    }
+
+    public void HumanPass()
+    {
+        RequireCallDecision();
+        PendingCall = null;
+
+        if (!ResolveCalls(humanPassed: true))
+        {
+            _state = TurnState.NextPlayer;
+        }
+
+        RunUntilPause(playAtLeastOnce: false);
+    }
+
+    private void RequireCallDecision()
+    {
+        if (!AwaitingHumanCall || PendingCall is null)
+        {
+            throw new InvalidOperationException("The engine is not waiting for a call decision.");
         }
     }
 
-    private void CommitDiscard(Player player, Tile discarded)
+    // Runs phases until a draw is next, a call just happened, the round ended, or the human must act.
+    private void RunUntilPause(bool playAtLeastOnce)
     {
-        _discards.Add(discarded);
-        player.AddDiscard(discarded);
-        LastDiscard = discarded;
-        LastDiscardSeat = player.Seat;
-        Log($"     {Label(player)} discards {discarded} | discards so far {_discards.Count}");
-        _state = TurnState.WaitPhase;
+        _stepBreak = false;
+
+        if (playAtLeastOnce)
+        {
+            Advance();
+        }
+
+        while (!IsFinished && _state != TurnState.Draw && !AwaitingHumanDiscard && !AwaitingHumanCall && !_stepBreak)
+        {
+            Advance();
+        }
     }
 
     // The wall is only checked when a new turn starts, so every turn that begins finishes.
@@ -204,7 +302,7 @@ public sealed class GameEngine
                     return;
                 }
 
-                CommitDiscard(player, player.Hand.DiscardBest(_rng));
+                CommitDiscard(player, player.Hand.DiscardBest(_rng, _forbidden));
                 break;
 
             case TurnState.WaitPhase:
@@ -224,7 +322,11 @@ public sealed class GameEngine
                     }
                 }
 
-                _state = TurnState.NextPlayer;
+                if (!ResolveCalls(humanPassed: false))
+                {
+                    _state = TurnState.NextPlayer;
+                }
+
                 break;
 
             case TurnState.NextPlayer:
@@ -239,7 +341,113 @@ public sealed class GameEngine
                 }
 
                 break;
+
+            case TurnState.CallDecision:
+                // Paused: the human answers through HumanPon, HumanChi or HumanPass.
+                return;
         }
+    }
+
+    private void CommitDiscard(Player player, Tile discarded)
+    {
+        _discards.Add(discarded);
+        player.AddDiscard(discarded);
+        LastDiscard = discarded;
+        LastDiscardSeat = player.Seat;
+        _forbidden = new List<Tile>();
+        Log($"     {Label(player)} discards {discarded} | discards so far {_discards.Count}");
+        _state = TurnState.WaitPhase;
+    }
+
+    // Decides who, if anyone, calls the last discard. Returns true when the state was changed
+    // (a bot called, or the human is being asked); false when nobody calls.
+    // Priority follows the rules: ron (already checked) > pon > chi, and only the player to the
+    // discarder's left may chi. The last discard of the round can't be called.
+    private bool ResolveCalls(bool humanPassed)
+    {
+        if (_wall.LiveCount == 0 || LastDiscard is null || LastDiscardSeat is null)
+        {
+            return false;
+        }
+
+        var tile = LastDiscard;
+        var from = LastDiscardSeat.Value;
+        var chiSeat = (from + 1) % 4;
+
+        int? ponSeat = null;
+        for (var seat = 0; seat < 4; seat++)
+        {
+            if (seat != from && _players[seat].Hand.CanPon(tile))
+            {
+                ponSeat = seat;
+                break;
+            }
+        }
+
+        var chiOptions = _players[chiSeat].Hand.ChiOptions(tile);
+
+        // 1. A bot that can pon does so when it brings the hand closer to winning.
+        if (ponSeat is int ps && ps != HumanSeat)
+        {
+            var hand = _players[ps].Hand;
+            if (hand.ShantenAfterPon(tile) < hand.GetShanten())
+            {
+                ExecuteCall(_players[ps], MeldType.Pon, null);
+                return true;
+            }
+        }
+
+        // 2. The human gets to decide on anything they could call (pon beats a bot's chi).
+        if (!humanPassed && HumanSeat is int human && human != from)
+        {
+            var canPon = ponSeat == human;
+            var humanChi = human == chiSeat ? chiOptions : Array.Empty<ChiOption>();
+            if (canPon || humanChi.Count > 0)
+            {
+                PendingCall = new CallOptions(tile, from, canPon, humanChi);
+                _state = TurnState.CallDecision;
+                return true;
+            }
+        }
+
+        // 3. Otherwise the next bot in turn order may chi, picking the option that helps most.
+        if (chiSeat != HumanSeat && chiOptions.Count > 0)
+        {
+            var hand = _players[chiSeat].Hand;
+            var current = hand.GetShanten();
+            var best = chiOptions.OrderBy(option => hand.ShantenAfterChi(tile, option)).First();
+            if (hand.ShantenAfterChi(tile, best) < current)
+            {
+                ExecuteCall(_players[chiSeat], MeldType.Chi, best);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Moves the last discard from its river into the caller's meld; the caller then discards.
+    private void ExecuteCall(Player caller, MeldType type, ChiOption? option)
+    {
+        var tile = LastDiscard!;
+        var fromPlayer = _players[LastDiscardSeat!.Value];
+        fromPlayer.RemoveLastDiscard();
+
+        var meld = type == MeldType.Pon
+            ? caller.Hand.Pon(tile, fromPlayer.Seat)
+            : caller.Hand.Chi(tile, option!, fromPlayer.Seat);
+
+        _forbidden = Meld.ForbiddenDiscards(type, tile, meld.Tiles).ToList();
+        Log($"     {Label(caller)} {(type == MeldType.Pon ? "pons" : "chis")} {tile} from {Label(fromPlayer)} | {caller.Hand}");
+
+        CallCount++;
+        PendingCall = null;
+        LastDiscard = null;
+        LastDiscardSeat = null;
+        LastDrawnTile = null;
+        _currentPlayerIndex = caller.Seat;
+        _state = TurnState.Discard;
+        _stepBreak = true;
     }
 
     private void SetupRound()

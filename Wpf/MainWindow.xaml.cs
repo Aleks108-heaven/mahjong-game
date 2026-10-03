@@ -14,6 +14,7 @@ public partial class MainWindow : Window
     private const int MaxTurns = 70;
     private const double HandTileWidth = 34;
     private const double RiverTileWidth = 30;
+    private const double MeldTileWidth = 28;
 
     private static readonly string[] SeatNames = { "East", "South", "West", "North" };
     private static readonly string[] WindKanji = { "東", "南", "西", "北" };
@@ -153,7 +154,7 @@ public partial class MainWindow : Window
     private void AdvanceBots()
     {
         PlayOneTurn();
-        if (!_engine.IsFinished && !_engine.AwaitingHumanDiscard)
+        if (!WaitingForHuman())
         {
             _timer.Start();
         }
@@ -163,15 +164,21 @@ public partial class MainWindow : Window
     {
         PlayOneTurn();
 
-        if (_engine.IsFinished || _engine.AwaitingHumanDiscard)
+        if (WaitingForHuman())
         {
             _timer.Stop();
         }
     }
 
+    // True when the round is over or paused for the human (to discard or to answer a call).
+    private bool WaitingForHuman()
+    {
+        return _engine.IsFinished || _engine.AwaitingHumanDiscard || _engine.AwaitingHumanCall;
+    }
+
     private void PlayOneTurn()
     {
-        if (_engine.IsFinished || _engine.AwaitingHumanDiscard)
+        if (WaitingForHuman())
         {
             return;
         }
@@ -195,15 +202,55 @@ public partial class MainWindow : Window
 
         _engine.DiscardHuman(tile);
         _showHint = false;
+        ResumeAfterHumanAction();
+    }
+
+    private void OnPon()
+    {
+        if (!_engine.AwaitingHumanCall || !_engine.PendingCall!.CanPon)
+        {
+            return;
+        }
+
+        _engine.HumanPon();
+        ResumeAfterHumanAction();
+    }
+
+    private void OnChi(ChiOption option)
+    {
+        if (!_engine.AwaitingHumanCall)
+        {
+            return;
+        }
+
+        _engine.HumanChi(option);
+        ResumeAfterHumanAction();
+    }
+
+    private void OnPass()
+    {
+        if (!_engine.AwaitingHumanCall)
+        {
+            return;
+        }
+
+        _engine.HumanPass();
+        ResumeAfterHumanAction();
+    }
+
+    // After the human discards, calls or passes: show the result and let the bots carry on if it is their move.
+    private void ResumeAfterHumanAction()
+    {
+        _showHint = false;
         Refresh();
 
-        if (!_engine.IsFinished)
+        if (WaitingForHuman())
         {
-            _timer.Start();
+            _timer.Stop();
         }
         else
         {
-            _timer.Stop();
+            _timer.Start();
         }
     }
 
@@ -213,6 +260,7 @@ public partial class MainWindow : Window
         var result = _engine.Result;
         var human = _engine.HumanSeat;
         var awaiting = _engine.AwaitingHumanDiscard;
+        var awaitingCall = _engine.AwaitingHumanCall;
 
         TurnText.Text = $"Turn {_engine.Turns} / {MaxTurns}";
         WallText.Text = $"Wall {_engine.WallRemaining} left";
@@ -225,13 +273,13 @@ public partial class MainWindow : Window
             var canClick = isYou && awaiting;
             var reveal = finished || isYou || ShowHands.IsChecked == true;
             var isWinner = finished && result!.WinnerSeat == panel.Seat;
-            var isNext = !finished && _engine.CurrentSeat == panel.Seat;
+            var isNext = !finished && !awaitingCall && _engine.CurrentSeat == panel.Seat;
             var lastRiverIndex = _engine.LastDiscardSeat == panel.Seat ? player.Discards.Count - 1 : -1;
             var winTileIndex = isWinner && result!.Outcome == RoundOutcome.Ron
                 ? FindLastIndex(player.Hand.Tiles, _engine.WinningTile!)
                 : -1;
             var drawnIndex = canClick ? FindLastIndex(player.Hand.Tiles, _engine.LastDrawnTile!) : -1;
-            var hints = canClick && _showHint ? player.Hand.SuggestDiscards() : new List<Tile>();
+            var hints = canClick && _showHint ? _engine.SuggestHumanDiscards() : new List<Tile>();
 
             panel.Title.Text = $"Player {panel.Seat + 1} · {SeatNames[panel.Seat]}" + (isYou ? " · You" : string.Empty);
 
@@ -256,6 +304,12 @@ public partial class MainWindow : Window
                 panel.Hand.Children.Add(canClick
                     ? ClickableTile(player.Hand, tile, mark)
                     : TileView.Create(tile, HandTileWidth, !reveal, mark));
+            }
+
+            // Open melds (chi/pon) are public, so they are always face-up.
+            foreach (var meld in player.Hand.Melds)
+            {
+                panel.Hand.Children.Add(MeldView(meld));
             }
 
             panel.River.Children.Clear();
@@ -284,7 +338,11 @@ public partial class MainWindow : Window
                 panel.Status.Foreground = MutedColour;
             }
 
-            panel.Turn.Text = canClick ? "▶ Your move" : isNext ? "▶ Draws next" : string.Empty;
+            panel.Turn.Text = canClick
+                ? "▶ Your move"
+                : isNext
+                    ? (_engine.NextActionIsDraw ? "▶ Draws next" : "▶ Discards next")
+                    : string.Empty;
             panel.Root.BorderBrush = isWinner ? WinnerEdge : isNext ? NextEdge : isYou ? YouEdge : PanelEdge;
             panel.Root.BorderThickness = new Thickness(isWinner || isNext ? 3 : isYou ? 2 : 1);
         }
@@ -295,6 +353,7 @@ public partial class MainWindow : Window
         SpeedLabel.Text = $"Speed: {(int)SpeedSlider.Value} ms per {(spectating ? "turn" : "bot turn")}";
 
         ShowTurnBanner(awaiting);
+        ShowCallBanner(awaitingCall);
         ShowResult();
 
         if (finished && !SeedBox.IsKeyboardFocusWithin && !SeatPicker.IsKeyboardFocusWithin)
@@ -314,6 +373,94 @@ public partial class MainWindow : Window
                 }
             });
         }
+        else if (awaitingCall)
+        {
+            // Focus Pass, the safe default, so a stray Enter never makes a call by accident.
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+            {
+                if (_engine.AwaitingHumanCall)
+                {
+                    CallButtons.Children.OfType<Button>().LastOrDefault()?.Focus();
+                }
+            });
+        }
+    }
+
+    // A set of three face-up tiles in a dark tray; the called tile has an orange outline.
+    private static FrameworkElement MeldView(Meld meld)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        var calledShown = false;
+        foreach (var tile in meld.Tiles)
+        {
+            var isCalled = !calledShown && tile.Equals(meld.CalledTile);
+            calledShown |= isCalled;
+            row.Children.Add(TileView.Create(tile, MeldTileWidth, false, isCalled ? TileMark.LastDiscard : TileMark.None));
+        }
+
+        var kind = meld.Type == MeldType.Pon ? "Pon" : "Chi";
+        var description = $"{kind} of {string.Join(" ", meld.Tiles)}, called {meld.CalledTile} from Player {meld.FromSeat + 1}";
+        var tray = new Border
+        {
+            Background = Frozen("#12372B"),
+            CornerRadius = new CornerRadius(7),
+            Padding = new Thickness(3),
+            Margin = new Thickness(8, 0, 0, 0),
+            Child = row,
+            ToolTip = description
+        };
+        AutomationProperties.SetName(tray, description);
+        return tray;
+    }
+
+    private void ShowCallBanner(bool awaitingCall)
+    {
+        CallBanner.Visibility = awaitingCall ? Visibility.Visible : Visibility.Collapsed;
+        CallButtons.Children.Clear();
+        if (!awaitingCall)
+        {
+            return;
+        }
+
+        var call = _engine.PendingCall!;
+        CallTitle.Text = $"{SeatLabel(call.FromSeat)} discarded {TileView.Describe(call.Discard)}. Call it?";
+
+        var options = new List<string>();
+        if (call.CanPon)
+        {
+            options.Add("pon (three of a kind)");
+            CallButtons.Children.Add(CallButton("Pon (P)", () => OnPon(), primary: true));
+        }
+
+        for (var i = 0; i < call.ChiOptions.Count; i++)
+        {
+            var option = call.ChiOptions[i];
+            var tiles = new[] { call.Discard, option.A, option.B }.OrderBy(t => t).ToList();
+            var label = $"Chi {string.Join(" ", tiles)}" + (i == 0 ? " (C)" : string.Empty);
+            if (i == 0)
+            {
+                options.Add("chi (a run)");
+            }
+
+            CallButtons.Children.Add(CallButton(label, () => OnChi(option), primary: !call.CanPon && i == 0));
+        }
+
+        CallButtons.Children.Add(CallButton("Pass (S)", () => OnPass(), primary: false));
+        CallHint.Text = $"You can {string.Join(" or ", options)}. Calling takes the tile and you discard next; "
+            + "the called tile stays locked. Pass is the focused default.";
+    }
+
+    private Button CallButton(string text, Action onClick, bool primary)
+    {
+        var button = new Button
+        {
+            Content = text,
+            Style = (Style)FindResource(primary ? "PrimaryButton" : "ActionButton"),
+            Padding = new Thickness(16, 8, 16, 8),
+            Margin = new Thickness(8, 0, 0, 0)
+        };
+        button.Click += (_, _) => onClick();
+        return button;
     }
 
     private Button ClickableTile(PlayerHand hand, Tile tile, TileMark mark)
@@ -334,13 +481,23 @@ public partial class MainWindow : Window
             ToolTip = $"Discard {description}: {outcome}"
         };
         AutomationProperties.SetName(button, $"Discard {description}");
+
+        if (!_engine.IsDiscardAllowed(tile))
+        {
+            // Swap-calling rule: the tile you just called (or its mirror in a chi) is locked this turn.
+            button.IsEnabled = false;
+            button.Opacity = 0.4;
+            button.ToolTip = $"{description} is locked: you can't discard it right after calling";
+            AutomationProperties.SetName(button, $"{description}, locked this turn");
+        }
+
         button.Click += (_, _) => OnTileChosen(tile);
         return button;
     }
 
     private Button? FirstHandButton()
     {
-        return _panels[_engine.HumanSeat!.Value].Hand.Children.OfType<Button>().FirstOrDefault();
+        return _panels[_engine.HumanSeat!.Value].Hand.Children.OfType<Button>().FirstOrDefault(b => b.IsEnabled);
     }
 
     private bool PlayerHandHasNoFocus()
@@ -358,12 +515,25 @@ public partial class MainWindow : Window
         }
 
         var hand = _engine.Players[_engine.HumanSeat!.Value].Hand;
+        var called = _engine.ForbiddenDiscards.Count > 0;
+        YourMoveText.Text = called
+            ? "You called: now discard a tile."
+            : "Your move: click a tile to discard it.";
+
         if (_showHint)
         {
-            var suggestions = hand.SuggestDiscards();
+            var suggestions = _engine.SuggestHumanDiscards();
             var best = hand.ShantenAfterDiscard(suggestions[0]);
             var goal = best == 0 ? "tenpai" : $"shanten {best}";
             HintMessage.Text = $"Suggested: {string.Join(", ", suggestions)} (keeps you at {goal}). Green outline marks them.";
+        }
+        else if (called)
+        {
+            var lastMeld = hand.Melds[^1];
+            HintMessage.Text = lastMeld.Type == MeldType.Pon
+                ? $"You can't discard the {lastMeld.CalledTile} you just called, and the dimmed tiles are locked this turn."
+                : "Dimmed tiles are locked this turn: you can't discard the tile you just called, "
+                  + "or the other end of the same run.";
         }
         else
         {
@@ -501,6 +671,22 @@ public partial class MainWindow : Window
                 break;
             case Key.H:
                 ShowHint();
+                e.Handled = true;
+                break;
+            case Key.P when _engine.AwaitingHumanCall:
+                OnPon();
+                e.Handled = true;
+                break;
+            case Key.C when _engine.AwaitingHumanCall:
+                if (_engine.PendingCall!.ChiOptions.Count > 0)
+                {
+                    OnChi(_engine.PendingCall.ChiOptions[0]);
+                }
+
+                e.Handled = true;
+                break;
+            case Key.S when _engine.AwaitingHumanCall:
+                OnPass();
                 e.Handled = true;
                 break;
             case Key.N:

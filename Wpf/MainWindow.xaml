@@ -189,6 +189,18 @@
                     </StackPanel>
                 </DockPanel>
             </Border>
+            <Border x:Name="CallBanner" Visibility="Collapsed" Background="#F2EFE6" CornerRadius="10"
+                    Padding="18,10" Margin="0,0,0,14">
+                <DockPanel>
+                    <StackPanel x:Name="CallButtons" DockPanel.Dock="Right" Orientation="Horizontal"
+                                VerticalAlignment="Center"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="CallTitle" FontSize="20" FontWeight="Bold" Foreground="{StaticResource InkBrush}"
+                                   TextWrapping="Wrap" AutomationProperties.LiveSetting="Assertive"/>
+                        <TextBlock x:Name="CallHint" FontSize="13" Foreground="#2C4A3D" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
             <Border x:Name="ResultBanner" Visibility="Collapsed" Background="{StaticResource GoldBrush}"
                     CornerRadius="10" Padding="18,12" Margin="0,0,0,14">
                 <StackPanel>

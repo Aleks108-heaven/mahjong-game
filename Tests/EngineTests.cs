@@ -229,8 +229,13 @@ public class StepApiTests
             Assert.Equal(1, engine.Turns);
             Assert.Equal(69, engine.WallRemaining);
             Assert.Single(engine.Discards);
-            Assert.Single(engine.Players[0].Discards);
-            Assert.Equal(1, engine.CurrentSeat);
+
+            // A bot may call that discard, which moves the turn to the caller instead of seat 1.
+            if (engine.CallCount == 0)
+            {
+                Assert.Single(engine.Players[0].Discards);
+                Assert.Equal(1, engine.CurrentSeat);
+            }
         }
     }
 
@@ -330,16 +335,53 @@ public class HumanSeatTests
     private static GameEngine NewEngine(int seed) => new(seed, TextWriter.Null);
 
     // Starts a round with a human at the given seat and plays bot turns until the human must discard.
+    // Any call offered along the way is declined, so the human never holds a meld here.
     private static GameEngine ToHumanDiscard(int seed, int seat)
     {
         var engine = NewEngine(seed);
         engine.StartRound(seat);
         while (!engine.IsFinished && !engine.AwaitingHumanDiscard)
         {
-            engine.PlayTurn();
+            if (engine.AwaitingHumanCall)
+            {
+                engine.HumanPass();
+            }
+            else
+            {
+                engine.PlayTurn();
+            }
         }
 
         return engine;
+    }
+
+    // Plays one human decision: best discard, and either every available call or none.
+    internal static void HumanStep(GameEngine engine, bool takeCalls)
+    {
+        if (engine.AwaitingHumanDiscard)
+        {
+            engine.DiscardHuman(engine.SuggestHumanDiscards()[0]);
+        }
+        else if (engine.AwaitingHumanCall)
+        {
+            var call = engine.PendingCall!;
+            if (takeCalls && call.CanPon)
+            {
+                engine.HumanPon();
+            }
+            else if (takeCalls && call.ChiOptions.Count > 0)
+            {
+                engine.HumanChi(call.ChiOptions[0]);
+            }
+            else
+            {
+                engine.HumanPass();
+            }
+        }
+        else
+        {
+            engine.PlayTurn();
+        }
     }
 
     [Theory]
@@ -409,12 +451,15 @@ public class HumanSeatTests
         engine.DiscardHuman(tile);
 
         Assert.Equal(13, engine.Players[0].Hand.Tiles.Count);
-        Assert.Equal(tile, engine.Players[0].Discards[^1]);
-        Assert.Equal(tile, engine.LastDiscard);
-        Assert.Equal(0, engine.LastDiscardSeat);
+        Assert.Equal(tile, engine.Discards[^1]);
         Assert.False(engine.AwaitingHumanDiscard);
-        if (!engine.IsFinished)
+
+        // Unless a bot called the tile, it sits in the human's river and the turn moves to seat 1.
+        if (engine.CallCount == 0 && !engine.IsFinished && !engine.AwaitingHumanCall)
         {
+            Assert.Equal(tile, engine.Players[0].Discards[^1]);
+            Assert.Equal(tile, engine.LastDiscard);
+            Assert.Equal(0, engine.LastDiscardSeat);
             Assert.Equal(1, engine.CurrentSeat);
         }
     }
@@ -451,15 +496,8 @@ public class HumanSeatTests
             var guard = 0;
             while (!engine.IsFinished)
             {
-                Assert.True(guard++ < 500, "Round did not end.");
-                if (engine.AwaitingHumanDiscard)
-                {
-                    engine.DiscardHuman(engine.Players[engine.HumanSeat!.Value].Hand.SuggestDiscards()[0]);
-                }
-                else
-                {
-                    engine.PlayTurn();
-                }
+                Assert.True(guard++ < 800, "Round did not end.");
+                HumanStep(engine, takeCalls: seed % 2 == 0);
             }
 
             Assert.InRange(engine.Turns, 1, 70);
@@ -477,14 +515,7 @@ public class HumanSeatTests
             engine.StartRound(0);
             while (!engine.IsFinished)
             {
-                if (engine.AwaitingHumanDiscard)
-                {
-                    engine.DiscardHuman(engine.Players[0].Hand.SuggestDiscards()[0]);
-                }
-                else
-                {
-                    engine.PlayTurn();
-                }
+                HumanStep(engine, takeCalls: false);
             }
 
             if (engine.Result!.WinnerSeat == 0)
@@ -523,6 +554,430 @@ public class HumanSeatTests
     }
 }
 
+public class HandCallTests
+{
+    private static PlayerHand Hand(string tiles)
+    {
+        var hand = new PlayerHand();
+        foreach (var token in tiles.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            hand.Add(Parse(token));
+        }
+
+        return hand;
+    }
+
+    private static Tile Parse(string token)
+    {
+        var rank = token[0] - '0';
+        return token[1] switch
+        {
+            'm' => new Tile(Suit.Manzu, rank),
+            'p' => new Tile(Suit.Pinzu, rank),
+            's' => new Tile(Suit.Souzu, rank),
+            _ => new Tile((Honor)(rank - 1))
+        };
+    }
+
+    private static string Pairs(IEnumerable<ChiOption> options)
+    {
+        return string.Join(",", options.Select(o => $"{o.A}{o.B}"));
+    }
+
+    [Fact]
+    public void CanPon_NeedsTwoMatchingTiles()
+    {
+        Assert.True(Hand("5p 5p 1m").CanPon(Parse("5p")));
+        Assert.True(Hand("5p 5p 5p 1m").CanPon(Parse("5p")));
+        Assert.False(Hand("5p 1m").CanPon(Parse("5p")));
+        Assert.False(Hand("4p 6p").CanPon(Parse("5p")));
+        Assert.True(Hand("1z 1z").CanPon(Parse("1z")));
+    }
+
+    [Fact]
+    public void ChiOptions_ListsEverySequenceTheDiscardCompletes()
+    {
+        Assert.Equal("3p4p,4p6p,6p7p", Pairs(Hand("3p 4p 6p 7p 9p").ChiOptions(Parse("5p"))));
+    }
+
+    [Fact]
+    public void ChiOptions_RespectsTheEdgesOfTheSuit()
+    {
+        Assert.Equal("2m3m", Pairs(Hand("2m 3m 4m").ChiOptions(Parse("1m"))));
+        Assert.Equal("7s8s", Pairs(Hand("7s 8s 6s").ChiOptions(Parse("9s"))));
+    }
+
+    [Fact]
+    public void ChiOptions_NeedsTheSameSuit_AndNeverAppliesToHonors()
+    {
+        Assert.Empty(Hand("3m 4m 6m 7m").ChiOptions(Parse("5p")));
+        Assert.Empty(Hand("1z 2z 3z 4z").ChiOptions(Parse("2z")));
+    }
+
+    [Fact]
+    public void Pon_MovesTwoTilesIntoAMeld()
+    {
+        var hand = Hand("1m 2m 3m 4m 5m 6m 7p 8p 9p 1s 1s 5s 5s");
+        var meld = hand.Pon(Parse("5s"), fromSeat: 2);
+
+        Assert.Equal(MeldType.Pon, meld.Type);
+        Assert.Equal(2, meld.FromSeat);
+        Assert.Equal(11, hand.Tiles.Count);
+        Assert.Equal(1, hand.MeldCount);
+        Assert.Equal(14, hand.TotalTiles);
+        Assert.DoesNotContain(Parse("5s"), hand.Tiles);
+        Assert.Equal("[5s 5s 5s]", meld.ToString());
+        Assert.EndsWith("[5s 5s 5s]", hand.ToString());
+    }
+
+    [Fact]
+    public void Chi_MovesTwoTilesIntoASortedMeld()
+    {
+        var hand = Hand("4p 6p 1m 1m 2m");
+        var meld = hand.Chi(Parse("5p"), new ChiOption(Parse("4p"), Parse("6p")), fromSeat: 3);
+
+        Assert.Equal(MeldType.Chi, meld.Type);
+        Assert.Equal("[4p 5p 6p]", meld.ToString());
+        Assert.Equal(3, hand.Tiles.Count);
+        Assert.Equal(1, hand.MeldCount);
+    }
+
+    [Fact]
+    public void Calls_ThrowWhenTheHandCannotMakeThem()
+    {
+        Assert.Throws<InvalidOperationException>(() => Hand("5p 1m").Pon(Parse("5p"), 1));
+        Assert.Throws<InvalidOperationException>(() =>
+            Hand("1m 2m").Chi(Parse("5p"), new ChiOption(Parse("4p"), Parse("6p")), 1));
+    }
+
+    [Fact]
+    public void OpenHand_CompleteAndWaits_CountMeldsAsThreeTiles()
+    {
+        var complete = Hand("1m 2m 3m 4m 5m 6m 7p 8p 9p 1s 1s 5s 5s");
+        complete.Pon(Parse("5s"), 1);
+        Assert.Equal(14, complete.TotalTiles);
+        Assert.True(complete.IsComplete());
+
+        var waiting = Hand("1m 2m 3m 4m 5m 6m 7p 8p 1s 1s 5s 5s 7z");
+        waiting.Pon(Parse("5s"), 1);
+        waiting.Remove(Parse("7z"));
+        Assert.Equal(13, waiting.TotalTiles);
+        Assert.True(waiting.IsTenpai());
+        Assert.True(waiting.CanWinOn(Parse("6p")));
+        Assert.True(waiting.CanWinOn(Parse("9p")));
+        Assert.False(waiting.CanWinOn(Parse("1p")));
+    }
+
+    [Fact]
+    public void ShantenAfterPon_ImprovesWhenTheCallHelps()
+    {
+        var hand = Hand("1m 2m 3m 4m 5m 6m 7p 8p 1s 1s 5s 5s 7z");
+
+        Assert.Equal(1, hand.GetShanten());
+        Assert.Equal(0, hand.ShantenAfterPon(Parse("5s")));
+    }
+
+    [Fact]
+    public void ShantenAfterChi_ImprovesWhenTheCallHelps()
+    {
+        var hand = Hand("1m 2m 3m 4m 5m 6m 7p 8p 1s 1s 5s 7s 7z");
+        var before = hand.GetShanten();
+
+        Assert.True(hand.ShantenAfterChi(Parse("6s"), new ChiOption(Parse("5s"), Parse("7s"))) < before);
+    }
+
+    [Fact]
+    public void MeldCount_ChangesTheShantenOfTheSameConcealedTiles()
+    {
+        var calc = new ShantenCalculator();
+        var counts = new int[34];
+        foreach (var token in "1m 2m 3m 4m 5m 6m 7p 8p 1s 1s".Split(' '))
+        {
+            counts[Parse(token).ToTileIndex()]++;
+        }
+
+        // 10 concealed tiles: two sets, 78p waiting, 11s pair. With one meld already made that is tenpai.
+        Assert.Equal(0, calc.CalculateShanten(counts, meldCount: 1));
+        Assert.Equal(2, calc.CalculateStandardShanten(counts, meldCount: 0));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(5)]
+    public void MeldCount_MustBeBetweenZeroAndFour(int meldCount)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ShantenCalculator().CalculateShanten(new int[34], meldCount));
+    }
+
+    [Fact]
+    public void OpenHand_NeverUsesSevenPairsOrOrphans()
+    {
+        var calc = new ShantenCalculator();
+        var counts = new int[34];
+        foreach (var token in "1m 1m 2p 2p 3s 3s 1z 1z 2z 2z".Split(' '))
+        {
+            counts[Parse(token).ToTileIndex()]++;
+        }
+
+        // Five pairs would be a seven-pairs tenpai-ish shape for a closed hand, but an open hand
+        // only ever scores as the standard shape.
+        Assert.Equal(calc.CalculateStandardShanten(counts, meldCount: 1), calc.CalculateShanten(counts, meldCount: 1));
+        Assert.Equal(
+            Math.Min(
+                calc.CalculateStandardShanten(counts),
+                Math.Min(calc.CalculateSevenPairsShanten(counts), calc.CalculateThirteenOrphansShanten(counts))),
+            calc.CalculateShanten(counts));
+    }
+
+    [Theory]
+    [InlineData("pon", "5m", "5m 5m 5m", "5m")]
+    [InlineData("chi", "3m", "3m 4m 5m", "3m,6m")]
+    [InlineData("chi", "5m", "3m 4m 5m", "5m,2m")]
+    [InlineData("chi", "4m", "3m 4m 5m", "4m")]
+    [InlineData("chi", "1m", "1m 2m 3m", "1m,4m")]
+    [InlineData("chi", "7m", "7m 8m 9m", "7m")]
+    [InlineData("chi", "9m", "7m 8m 9m", "9m,6m")]
+    public void ForbiddenDiscards_FollowTheSwapCallingRule(string kind, string called, string meld, string expected)
+    {
+        var type = kind == "pon" ? MeldType.Pon : MeldType.Chi;
+        var tiles = meld.Split(' ').Select(Parse).ToList();
+
+        var forbidden = Meld.ForbiddenDiscards(type, Parse(called), tiles);
+
+        Assert.Equal(expected, string.Join(",", forbidden));
+    }
+
+    [Fact]
+    public void SuggestDiscards_SkipsForbiddenTiles_UnlessNothingElseIsLeft()
+    {
+        var hand = Hand("1m 2m 3m 4m 5m 6m 7p 8p 1s 1s 5s 5s 7z");
+        var forbidden = new[] { Parse("7z") };
+
+        var suggestions = hand.SuggestDiscards(forbidden);
+        Assert.DoesNotContain(Parse("7z"), suggestions);
+
+        var onlyForbidden = Hand("7z");
+        Assert.Equal(Parse("7z"), Assert.Single(onlyForbidden.SuggestDiscards(forbidden)));
+    }
+}
+
+public class HumanCallTests
+{
+    private static GameEngine NewEngine(int seed) => new(seed, TextWriter.Null);
+
+    // Plays rounds (declining every call except the one wanted) until the human is offered a matching call.
+    private static GameEngine FindPrompt(Func<CallOptions, bool> wanted)
+    {
+        for (var seed = 0; seed < 800; seed++)
+        {
+            for (var seat = 0; seat < 4; seat++)
+            {
+                var engine = NewEngine(seed);
+                engine.StartRound(seat);
+
+                var guard = 0;
+                while (!engine.IsFinished && guard++ < 800)
+                {
+                    if (engine.AwaitingHumanCall && wanted(engine.PendingCall!))
+                    {
+                        return engine;
+                    }
+
+                    HumanSeatTests.HumanStep(engine, takeCalls: false);
+                }
+            }
+        }
+
+        throw new Xunit.Sdk.XunitException("No round offered the human a matching call.");
+    }
+
+    [Fact]
+    public void Prompt_OffersOnlyCallsTheHandCanMake()
+    {
+        var engine = FindPrompt(_ => true);
+        var call = engine.PendingCall!;
+        var human = engine.HumanSeat!.Value;
+        var hand = engine.Players[human].Hand;
+
+        Assert.NotEqual(human, call.FromSeat);
+        Assert.Equal(hand.CanPon(call.Discard), call.CanPon);
+        if (call.ChiOptions.Count > 0)
+        {
+            Assert.Equal((call.FromSeat + 1) % 4, human);
+            Assert.Equal(hand.ChiOptions(call.Discard), call.ChiOptions);
+        }
+
+        Assert.True(call.CanPon || call.ChiOptions.Count > 0);
+    }
+
+    [Fact]
+    public void WhileDeciding_TheRoundIsPaused()
+    {
+        var engine = FindPrompt(_ => true);
+        var turns = engine.Turns;
+
+        engine.PlayTurn();
+
+        Assert.True(engine.AwaitingHumanCall);
+        Assert.False(engine.AwaitingHumanDiscard);
+        Assert.Equal(turns, engine.Turns);
+        Assert.Throws<InvalidOperationException>(() => engine.DiscardHuman(new Tile(Suit.Manzu, 1)));
+    }
+
+    [Fact]
+    public void Pass_ContinuesWithoutChangingTheHand()
+    {
+        var engine = FindPrompt(_ => true);
+        var hand = engine.Players[engine.HumanSeat!.Value].Hand;
+        var tiles = hand.Tiles.ToList();
+
+        engine.HumanPass();
+
+        Assert.Null(engine.PendingCall);
+        Assert.Equal(tiles, hand.Tiles);
+        Assert.Equal(0, hand.MeldCount);
+        Assert.False(engine.AwaitingHumanCall && engine.PendingCall is null);
+    }
+
+    [Fact]
+    public void Pon_TakesTheTile_AndForcesADiscardThatIsNotTheCalledTile()
+    {
+        var engine = FindPrompt(c => c.CanPon);
+        var call = engine.PendingCall!;
+        var human = engine.HumanSeat!.Value;
+        var hand = engine.Players[human].Hand;
+        var riverBefore = engine.Players[call.FromSeat].Discards.Count;
+        var calls = engine.CallCount;
+
+        engine.HumanPon();
+
+        Assert.Equal(calls + 1, engine.CallCount);
+        Assert.Equal(1, hand.MeldCount);
+        Assert.Equal(MeldType.Pon, hand.Melds[0].Type);
+        Assert.Equal(14, hand.TotalTiles);
+        Assert.True(engine.AwaitingHumanDiscard);
+        Assert.Equal(human, engine.CurrentSeat);
+        Assert.Equal(riverBefore - 1, engine.Players[call.FromSeat].Discards.Count);
+        Assert.Null(engine.LastDiscard);
+        Assert.Contains(call.Discard, engine.ForbiddenDiscards);
+
+        // Throwing the called tile straight back is the swap-calling violation.
+        if (hand.Tiles.Contains(call.Discard))
+        {
+            Assert.False(engine.IsDiscardAllowed(call.Discard));
+            Assert.Throws<ArgumentException>(() => engine.DiscardHuman(call.Discard));
+            Assert.True(engine.AwaitingHumanDiscard);
+        }
+
+        var allowed = hand.Tiles.First(engine.IsDiscardAllowed);
+        engine.DiscardHuman(allowed);
+        Assert.Equal(13, hand.TotalTiles);
+        Assert.Empty(engine.ForbiddenDiscards);
+    }
+
+    [Fact]
+    public void Chi_TakesTheTile_AndForbidsTheCalledTile()
+    {
+        var engine = FindPrompt(c => c.ChiOptions.Count > 0);
+        var call = engine.PendingCall!;
+        var human = engine.HumanSeat!.Value;
+        var hand = engine.Players[human].Hand;
+        var option = call.ChiOptions[0];
+
+        engine.HumanChi(option);
+
+        Assert.Equal(1, hand.MeldCount);
+        Assert.Equal(MeldType.Chi, hand.Melds[0].Type);
+        Assert.Contains(call.Discard, hand.Melds[0].Tiles);
+        Assert.Equal(14, hand.TotalTiles);
+        Assert.True(engine.AwaitingHumanDiscard);
+        Assert.Contains(call.Discard, engine.ForbiddenDiscards);
+        Assert.False(engine.IsDiscardAllowed(call.Discard) && hand.Tiles.Contains(call.Discard));
+    }
+
+    [Fact]
+    public void SuggestedDiscardsAfterACall_AreAlwaysAllowed()
+    {
+        var engine = FindPrompt(c => c.CanPon || c.ChiOptions.Count > 0);
+        var call = engine.PendingCall!;
+        if (call.CanPon)
+        {
+            engine.HumanPon();
+        }
+        else
+        {
+            engine.HumanChi(call.ChiOptions[0]);
+        }
+
+        Assert.All(engine.SuggestHumanDiscards(), tile => Assert.True(engine.IsDiscardAllowed(tile)));
+    }
+
+    [Fact]
+    public void UnavailableCalls_Throw_AndKeepWaiting()
+    {
+        var chiOnly = FindPrompt(c => !c.CanPon && c.ChiOptions.Count > 0);
+        Assert.Throws<InvalidOperationException>(() => chiOnly.HumanPon());
+        Assert.Throws<ArgumentException>(() =>
+            chiOnly.HumanChi(new ChiOption(new Tile(Honor.East), new Tile(Honor.South))));
+        Assert.True(chiOnly.AwaitingHumanCall);
+    }
+
+    [Fact]
+    public void CallMethods_Throw_WhenNothingIsPending()
+    {
+        var engine = NewEngine(1);
+        engine.StartRound(0);
+
+        Assert.Throws<InvalidOperationException>(() => engine.HumanPon());
+        Assert.Throws<InvalidOperationException>(() => engine.HumanPass());
+        Assert.Throws<InvalidOperationException>(() =>
+            engine.HumanChi(new ChiOption(new Tile(Suit.Manzu, 1), new Tile(Suit.Manzu, 2))));
+    }
+
+    [Fact]
+    public void HumanTakingEveryCall_StillFinishesEveryRound_WithoutLosingTiles()
+    {
+        for (var seed = 0; seed < 150; seed++)
+        {
+            var engine = NewEngine(seed);
+            engine.StartRound(seed % 4);
+
+            var guard = 0;
+            while (!engine.IsFinished)
+            {
+                Assert.True(guard++ < 1000, "Round did not end.");
+                HumanSeatTests.HumanStep(engine, takeCalls: true);
+            }
+
+            var inHands = engine.Players.Sum(p => p.Hand.TotalTiles);
+            var inRivers = engine.Players.Sum(p => p.Discards.Count);
+            var expected = 136 + (engine.Result!.Outcome == RoundOutcome.Ron ? 1 : 0);
+            Assert.Equal(expected, inHands + inRivers + engine.WallRemaining + 14);
+        }
+    }
+
+    [Fact]
+    public void NobodyCallsTheVeryLastDiscard()
+    {
+        // The last discard of the round can't be called, so the round ends with the wall empty and
+        // every player still at 13 (counting melds) unless someone won.
+        for (var seed = 0; seed < 300; seed++)
+        {
+            var writer = new StringWriter();
+            var engine = new GameEngine(seed, writer);
+            var result = engine.RunSimulation();
+            if (result.Outcome != RoundOutcome.ExhaustiveDraw)
+            {
+                continue;
+            }
+
+            var lines = writer.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+            var lastDiscardIndex = Array.FindLastIndex(lines, l => l.Contains("discards"));
+            Assert.DoesNotContain(lines.Skip(lastDiscardIndex + 1), l => l.Contains("pons") || l.Contains("chis"));
+        }
+    }
+}
+
 public class EngineTests
 {
     private static (RoundResult Result, string Log, GameEngine Engine) Run(int seed)
@@ -546,22 +1001,22 @@ public class EngineTests
         {
             var (result, _, engine) = Run(seed);
 
-            // 70 draws is the maximum; a finished turn means 13 tiles in hand, except for a tsumo winner (14).
+            // 70 draws is the maximum; a finished turn means 13 tiles in hand (counting each meld as 3),
+            // except for a winner (14).
             Assert.InRange(result.Turns, 1, 70);
             foreach (var player in engine.Players)
             {
-                var isTsumoWinner = result.Outcome == RoundOutcome.Tsumo && result.WinnerSeat == player.Seat;
-                var isRonWinner = result.Outcome == RoundOutcome.Ron && result.WinnerSeat == player.Seat;
-                var expected = isTsumoWinner || isRonWinner ? 14 : 13;
+                var isWinner = result.WinnerSeat == player.Seat;
+                var expected = isWinner ? 14 : 13;
 
                 // The player who drew the last tile of an exhaustive draw has also discarded, so still 13.
-                Assert.Equal(expected, player.Hand.Tiles.Count);
+                Assert.Equal(expected, player.Hand.TotalTiles);
             }
         }
     }
 
     [Fact]
-    public void ExhaustiveDraw_UsesAll70DrawsAnd70Discards()
+    public void ExhaustiveDraw_UsesAll70Draws_AndOneDiscardPerDrawAndCall()
     {
         for (var seed = 0; seed < 500; seed++)
         {
@@ -569,12 +1024,65 @@ public class EngineTests
             if (result.Outcome == RoundOutcome.ExhaustiveDraw)
             {
                 Assert.Equal(70, result.Turns);
-                Assert.Equal(70, engine.Discards.Count);
+                Assert.Equal(70 + engine.CallCount, engine.Discards.Count);
                 return;
             }
         }
 
         Assert.Fail("No exhaustive draw found in 500 seeds; the bot may be winning every round.");
+    }
+
+    [Fact]
+    public void NoTileIsEverLostOrDuplicated()
+    {
+        // 136 tiles = concealed + melds + rivers + live wall + 14 dead wall.
+        // On a ron the winning tile is in both the winner's hand and the discarder's river, so +1.
+        for (var seed = 0; seed < 300; seed++)
+        {
+            var (result, _, engine) = Run(seed);
+            var inHands = engine.Players.Sum(p => p.Hand.TotalTiles);
+            var inRivers = engine.Players.Sum(p => p.Discards.Count);
+            var expected = 136 + (result.Outcome == RoundOutcome.Ron ? 1 : 0);
+
+            Assert.Equal(expected, inHands + inRivers + engine.WallRemaining + 14);
+        }
+    }
+
+    [Fact]
+    public void BotsActuallyCall_AndMeldsAreWellFormed()
+    {
+        var calls = 0;
+        for (var seed = 0; seed < 200; seed++)
+        {
+            var (_, _, engine) = Run(seed);
+            calls += engine.CallCount;
+
+            foreach (var player in engine.Players)
+            {
+                Assert.True(player.Hand.MeldCount <= 4);
+                foreach (var meld in player.Hand.Melds)
+                {
+                    Assert.Equal(3, meld.Tiles.Count);
+                    Assert.NotEqual(player.Seat, meld.FromSeat);
+                    Assert.Contains(meld.CalledTile, meld.Tiles);
+                    if (meld.Type == MeldType.Pon)
+                    {
+                        Assert.All(meld.Tiles, t => Assert.Equal(meld.CalledTile, t));
+                    }
+                    else
+                    {
+                        // A chi is three consecutive ranks in one numbered suit, and comes from the player on the left.
+                        var ranks = meld.Tiles.Select(t => t.Rank).OrderBy(r => r).ToArray();
+                        Assert.All(meld.Tiles, t => Assert.Equal(meld.CalledTile.Suit, t.Suit));
+                        Assert.Equal(ranks[0] + 1, ranks[1]);
+                        Assert.Equal(ranks[1] + 1, ranks[2]);
+                        Assert.Equal((player.Seat + 3) % 4, meld.FromSeat);
+                    }
+                }
+            }
+        }
+
+        Assert.True(calls > 50, $"Expected bots to call regularly but saw only {calls} calls in 200 rounds.");
     }
 
     [Fact]

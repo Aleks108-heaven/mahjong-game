@@ -6,5 +6,8 @@ public enum TurnState
     ActionPhase,
     Discard,
     WaitPhase,
-    NextPlayer
+    NextPlayer,
+
+    // Paused: the human may call the last discard (pon or chi) or pass.
+    CallDecision
 }
