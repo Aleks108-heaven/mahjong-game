@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -21,6 +22,7 @@ public partial class MainWindow : Window
     private static readonly Brush PanelEdge = Frozen("#2F7059");
     private static readonly Brush NextEdge = Frozen("#FFFFFF");
     private static readonly Brush WinnerEdge = Frozen("#FFD84D");
+    private static readonly Brush YouEdge = Frozen("#3D9BFF");
     private static readonly Brush TextColour = Frozen("#F2EFE6");
     private static readonly Brush MutedColour = Frozen("#B9CFC4");
     private static readonly Brush GoldColour = Frozen("#E8B84A");
@@ -30,6 +32,10 @@ public partial class MainWindow : Window
     private readonly List<SeatPanel> _panels = new();
     private GameEngine _engine = null!;
     private int _seed;
+    private bool _ready;
+    private bool _showHint;
+
+    private int? HumanSeat => _engine?.HumanSeat;
 
     public MainWindow()
     {
@@ -48,11 +54,12 @@ public partial class MainWindow : Window
         }
 
         _timer.Interval = TimeSpan.FromMilliseconds(SpeedSlider.Value);
-        _timer.Tick += (_, _) => PlayOneTurn();
+        _timer.Tick += (_, _) => OnTimerTick();
         Loaded += (_, _) => StartFromCommandLine();
     }
 
     // Optional developer arguments: MahjongTable.exe <seed> [turns-to-play]
+    // With a turns argument the app starts as a spectator and plays that many turns first.
     private void StartFromCommandLine()
     {
         var args = Environment.GetCommandLineArgs();
@@ -61,9 +68,16 @@ public partial class MainWindow : Window
             SeedBox.Text = args[1];
         }
 
+        var hasTurns = args.Length > 2 && int.TryParse(args[2], out _);
+        if (hasTurns)
+        {
+            SeatWatch.IsChecked = true;
+        }
+
+        _ready = true;
         NewRound();
 
-        if (args.Length > 2 && int.TryParse(args[2], out var turns))
+        if (hasTurns && int.TryParse(args[2], out var turns))
         {
             for (var i = 0; i < turns && !_engine.IsFinished; i++)
             {
@@ -72,6 +86,20 @@ public partial class MainWindow : Window
 
             Refresh();
         }
+    }
+
+    private int? SelectedSeat()
+    {
+        foreach (RadioButton radio in SeatPicker.Children)
+        {
+            if (radio.IsChecked == true)
+            {
+                var seat = int.Parse((string)radio.Tag);
+                return seat < 0 ? null : seat;
+            }
+        }
+
+        return null;
     }
 
     private void NewRound()
@@ -96,23 +124,55 @@ public partial class MainWindow : Window
         SeedHint.Foreground = MutedColour;
 
         LogBox.Clear();
+        _showHint = false;
         _engine = new GameEngine(_seed, TextWriter.Null);
         _engine.Logged += line =>
         {
             LogBox.AppendText(line + Environment.NewLine);
             LogBox.ScrollToEnd();
         };
-        _engine.StartRound();
+
+        var human = SelectedSeat();
+        _engine.StartRound(human);
+
+        // When you sit down, the other hands start face-down; spectators see everything.
+        ShowHands.IsChecked = human is null;
         Refresh();
-        NextButton.Focus();
+
+        if (human.HasValue)
+        {
+            AdvanceBots();
+        }
+        else
+        {
+            NextButton.Focus();
+        }
+    }
+
+    // Plays turns until it is the human's move: the first one immediately, the rest on the timer.
+    private void AdvanceBots()
+    {
+        PlayOneTurn();
+        if (!_engine.IsFinished && !_engine.AwaitingHumanDiscard)
+        {
+            _timer.Start();
+        }
+    }
+
+    private void OnTimerTick()
+    {
+        PlayOneTurn();
+
+        if (_engine.IsFinished || _engine.AwaitingHumanDiscard)
+        {
+            _timer.Stop();
+        }
     }
 
     private void PlayOneTurn()
     {
-        if (_engine.IsFinished)
+        if (_engine.IsFinished || _engine.AwaitingHumanDiscard)
         {
-            _timer.Stop();
-            AutoButton.IsChecked = false;
             return;
         }
 
@@ -126,11 +186,33 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnTileChosen(Tile tile)
+    {
+        if (!_engine.AwaitingHumanDiscard)
+        {
+            return;
+        }
+
+        _engine.DiscardHuman(tile);
+        _showHint = false;
+        Refresh();
+
+        if (!_engine.IsFinished)
+        {
+            _timer.Start();
+        }
+        else
+        {
+            _timer.Stop();
+        }
+    }
+
     private void Refresh()
     {
         var finished = _engine.IsFinished;
         var result = _engine.Result;
-        var reveal = ShowHands.IsChecked == true;
+        var human = _engine.HumanSeat;
+        var awaiting = _engine.AwaitingHumanDiscard;
 
         TurnText.Text = $"Turn {_engine.Turns} / {MaxTurns}";
         WallText.Text = $"Wall {_engine.WallRemaining} left";
@@ -139,18 +221,41 @@ public partial class MainWindow : Window
         foreach (var panel in _panels)
         {
             var player = _engine.Players[panel.Seat];
+            var isYou = human == panel.Seat;
+            var canClick = isYou && awaiting;
+            var reveal = finished || isYou || ShowHands.IsChecked == true;
             var isWinner = finished && result!.WinnerSeat == panel.Seat;
             var isNext = !finished && _engine.CurrentSeat == panel.Seat;
             var lastRiverIndex = _engine.LastDiscardSeat == panel.Seat ? player.Discards.Count - 1 : -1;
             var winTileIndex = isWinner && result!.Outcome == RoundOutcome.Ron
                 ? FindLastIndex(player.Hand.Tiles, _engine.WinningTile!)
                 : -1;
+            var drawnIndex = canClick ? FindLastIndex(player.Hand.Tiles, _engine.LastDrawnTile!) : -1;
+            var hints = canClick && _showHint ? player.Hand.SuggestDiscards() : new List<Tile>();
+
+            panel.Title.Text = $"Player {panel.Seat + 1} · {SeatNames[panel.Seat]}" + (isYou ? " · You" : string.Empty);
 
             panel.Hand.Children.Clear();
             for (var i = 0; i < player.Hand.Tiles.Count; i++)
             {
-                var mark = i == winTileIndex ? TileMark.WinningTile : TileMark.None;
-                panel.Hand.Children.Add(TileView.Create(player.Hand.Tiles[i], HandTileWidth, !reveal, mark));
+                var tile = player.Hand.Tiles[i];
+                var mark = TileMark.None;
+                if (i == winTileIndex)
+                {
+                    mark = TileMark.WinningTile;
+                }
+                else if (hints.Contains(tile))
+                {
+                    mark = TileMark.Hint;
+                }
+                else if (i == drawnIndex)
+                {
+                    mark = TileMark.Drawn;
+                }
+
+                panel.Hand.Children.Add(canClick
+                    ? ClickableTile(player.Hand, tile, mark)
+                    : TileView.Create(tile, HandTileWidth, !reveal, mark));
             }
 
             panel.River.Children.Clear();
@@ -179,14 +284,91 @@ public partial class MainWindow : Window
                 panel.Status.Foreground = MutedColour;
             }
 
-            panel.Turn.Text = isNext ? "▶ Draws next" : string.Empty;
-            panel.Root.BorderBrush = isWinner ? WinnerEdge : isNext ? NextEdge : PanelEdge;
-            panel.Root.BorderThickness = new Thickness(isWinner || isNext ? 3 : 1);
+            panel.Turn.Text = canClick ? "▶ Your move" : isNext ? "▶ Draws next" : string.Empty;
+            panel.Root.BorderBrush = isWinner ? WinnerEdge : isNext ? NextEdge : isYou ? YouEdge : PanelEdge;
+            panel.Root.BorderThickness = new Thickness(isWinner || isNext ? 3 : isYou ? 2 : 1);
         }
 
-        NextButton.IsEnabled = !finished;
-        AutoButton.IsEnabled = !finished;
+        var spectating = human is null;
+        NextButton.IsEnabled = !finished && spectating;
+        AutoButton.IsEnabled = !finished && spectating;
+        SpeedLabel.Text = $"Speed: {(int)SpeedSlider.Value} ms per {(spectating ? "turn" : "bot turn")}";
+
+        ShowTurnBanner(awaiting);
         ShowResult();
+
+        if (finished && !SeedBox.IsKeyboardFocusWithin && !SeatPicker.IsKeyboardFocusWithin)
+        {
+            // The round is over, so the natural next step is a new one.
+            NewButton.Focus();
+        }
+
+        if (awaiting)
+        {
+            // Put keyboard focus on the first tile so Enter and the arrow/Tab keys work straight away.
+            Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+            {
+                if (_engine.AwaitingHumanDiscard && !HintButton.IsKeyboardFocusWithin && PlayerHandHasNoFocus())
+                {
+                    FirstHandButton()?.Focus();
+                }
+            });
+        }
+    }
+
+    private Button ClickableTile(PlayerHand hand, Tile tile, TileMark mark)
+    {
+        var description = TileView.Describe(tile);
+        var after = hand.ShantenAfterDiscard(tile);
+        var outcome = after switch
+        {
+            < 0 => "completes your hand",
+            0 => "tenpai",
+            _ => $"shanten {after}"
+        };
+
+        var button = new Button
+        {
+            Content = TileView.Create(tile, HandTileWidth, false, mark),
+            Style = (Style)FindResource("TileButton"),
+            ToolTip = $"Discard {description}: {outcome}"
+        };
+        AutomationProperties.SetName(button, $"Discard {description}");
+        button.Click += (_, _) => OnTileChosen(tile);
+        return button;
+    }
+
+    private Button? FirstHandButton()
+    {
+        return _panels[_engine.HumanSeat!.Value].Hand.Children.OfType<Button>().FirstOrDefault();
+    }
+
+    private bool PlayerHandHasNoFocus()
+    {
+        var hand = _panels[_engine.HumanSeat!.Value].Hand;
+        return !hand.IsKeyboardFocusWithin && !SeedBox.IsKeyboardFocusWithin;
+    }
+
+    private void ShowTurnBanner(bool awaiting)
+    {
+        TurnBanner.Visibility = awaiting ? Visibility.Visible : Visibility.Collapsed;
+        if (!awaiting)
+        {
+            return;
+        }
+
+        var hand = _engine.Players[_engine.HumanSeat!.Value].Hand;
+        if (_showHint)
+        {
+            var suggestions = hand.SuggestDiscards();
+            var best = hand.ShantenAfterDiscard(suggestions[0]);
+            var goal = best == 0 ? "tenpai" : $"shanten {best}";
+            HintMessage.Text = $"Suggested: {string.Join(", ", suggestions)} (keeps you at {goal}). Green outline marks them.";
+        }
+        else
+        {
+            HintMessage.Text = "Blue outline = the tile you just drew. Hover a tile to see where it leaves you. Tab and Enter also work.";
+        }
     }
 
     private void ShowResult()
@@ -210,9 +392,10 @@ public partial class MainWindow : Window
         ResultBanner.Visibility = Visibility.Visible;
     }
 
-    private static string SeatLabel(int seat)
+    private string SeatLabel(int seat)
     {
-        return $"Player {seat + 1} ({SeatNames[seat]})";
+        var you = HumanSeat == seat ? " - you" : string.Empty;
+        return $"Player {seat + 1} ({SeatNames[seat]}{you})";
     }
 
     private static int FindLastIndex(IReadOnlyList<Tile> tiles, Tile tile)
@@ -238,6 +421,30 @@ public partial class MainWindow : Window
         NewRound();
     }
 
+    private void HintButton_Click(object sender, RoutedEventArgs e)
+    {
+        ShowHint();
+    }
+
+    private void ShowHint()
+    {
+        if (_engine is null || !_engine.AwaitingHumanDiscard)
+        {
+            return;
+        }
+
+        _showHint = true;
+        Refresh();
+    }
+
+    private void Seat_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_ready)
+        {
+            NewRound();
+        }
+    }
+
     private void AutoButton_Changed(object sender, RoutedEventArgs e)
     {
         if (_engine is null)
@@ -245,11 +452,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (AutoButton.IsChecked == true && !_engine.IsFinished)
+        if (AutoButton.IsChecked == true && !_engine.IsFinished && HumanSeat is null)
         {
             _timer.Start();
         }
-        else
+        else if (HumanSeat is null)
         {
             _timer.Stop();
         }
@@ -261,7 +468,8 @@ public partial class MainWindow : Window
         _timer.Interval = TimeSpan.FromMilliseconds(ms);
         if (SpeedLabel is not null)
         {
-            SpeedLabel.Text = $"Speed: {ms} ms per turn";
+            var spectating = _engine is null || _engine.HumanSeat is null;
+            SpeedLabel.Text = $"Speed: {ms} ms per {(spectating ? "turn" : "bot turn")}";
         }
     }
 
@@ -276,7 +484,7 @@ public partial class MainWindow : Window
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         // Letter shortcuts must not fire while typing a seed.
-        if (Keyboard.FocusedElement is TextBox && !(Keyboard.FocusedElement as TextBox)!.IsReadOnly)
+        if (Keyboard.FocusedElement is TextBox { IsReadOnly: false })
         {
             return;
         }
@@ -289,6 +497,10 @@ public partial class MainWindow : Window
                 break;
             case Key.A when AutoButton.IsEnabled:
                 AutoButton.IsChecked = AutoButton.IsChecked != true;
+                e.Handled = true;
+                break;
+            case Key.H:
+                ShowHint();
                 e.Handled = true;
                 break;
             case Key.N:
@@ -310,6 +522,7 @@ public partial class MainWindow : Window
     {
         public int Seat { get; }
         public Border Root { get; }
+        public TextBlock Title { get; }
         public TextBlock Status { get; }
         public TextBlock Turn { get; }
         public TextBlock RiverCount { get; }
@@ -338,7 +551,7 @@ public partial class MainWindow : Window
                 }
             };
 
-            var name = new TextBlock
+            Title = new TextBlock
             {
                 Text = $"Player {seat + 1} · {SeatNames[seat]}",
                 FontSize = 18,
@@ -348,7 +561,7 @@ public partial class MainWindow : Window
 
             Turn = new TextBlock { FontSize = 13, Foreground = TextColour, FontWeight = FontWeights.SemiBold };
             var nameStack = new StackPanel { Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-            nameStack.Children.Add(name);
+            nameStack.Children.Add(Title);
             nameStack.Children.Add(Turn);
 
             Status = new TextBlock
@@ -366,7 +579,8 @@ public partial class MainWindow : Window
             header.Children.Add(Status);
             header.Children.Add(nameStack);
 
-            Hand = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+            // Top margin leaves room for a hovered tile to lift without being clipped.
+            Hand = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
             RiverCount = new TextBlock
             {
                 FontSize = 12,

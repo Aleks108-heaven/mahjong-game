@@ -10,7 +10,9 @@ public enum TileMark
 {
     None,
     LastDiscard,
-    WinningTile
+    WinningTile,
+    Drawn,
+    Hint
 }
 
 // Draws one mahjong tile. Suit is shown by glyph and label as well as colour, so colour is never the only cue.
@@ -30,6 +32,8 @@ public static class TileView
     private static readonly Brush InkBrush = Frozen("#1C1C1C");
     private static readonly Brush LastBrush = Frozen("#F2A33A");
     private static readonly Brush WinBrush = Frozen("#FFD84D");
+    private static readonly Brush DrawnBrush = Frozen("#3D9BFF");
+    private static readonly Brush HintBrush = Frozen("#2FD36B");
 
     public static FrameworkElement Create(Tile tile, double width, bool faceDown = false, TileMark mark = TileMark.None)
     {
@@ -50,7 +54,13 @@ public static class TileView
 
         if (mark != TileMark.None && !faceDown)
         {
-            border.BorderBrush = mark == TileMark.WinningTile ? WinBrush : LastBrush;
+            border.BorderBrush = mark switch
+            {
+                TileMark.WinningTile => WinBrush,
+                TileMark.Drawn => DrawnBrush,
+                TileMark.Hint => HintBrush,
+                _ => LastBrush
+            };
             border.BorderThickness = new Thickness(2.5, 2.5, 2.5, 4);
         }
 

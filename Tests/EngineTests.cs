@@ -325,6 +325,204 @@ public class StepApiTests
     }
 }
 
+public class HumanSeatTests
+{
+    private static GameEngine NewEngine(int seed) => new(seed, TextWriter.Null);
+
+    // Starts a round with a human at the given seat and plays bot turns until the human must discard.
+    private static GameEngine ToHumanDiscard(int seed, int seat)
+    {
+        var engine = NewEngine(seed);
+        engine.StartRound(seat);
+        while (!engine.IsFinished && !engine.AwaitingHumanDiscard)
+        {
+            engine.PlayTurn();
+        }
+
+        return engine;
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(4)]
+    public void StartRound_RejectsBadSeat(int seat)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => NewEngine(1).StartRound(seat));
+    }
+
+    [Fact]
+    public void WithoutHuman_NeverWaits()
+    {
+        var engine = NewEngine(1);
+        engine.StartRound();
+        Assert.Null(engine.HumanSeat);
+        Assert.False(engine.AwaitingHumanDiscard);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(3)]
+    public void PausesAtTheHumansDiscard_WithFourteenTiles(int seat)
+    {
+        for (var seed = 0; seed < 50; seed++)
+        {
+            var engine = ToHumanDiscard(seed, seat);
+            if (engine.IsFinished)
+            {
+                continue; // a bot won before the human's first turn
+            }
+
+            Assert.True(engine.AwaitingHumanDiscard);
+            Assert.Equal(seat, engine.CurrentSeat);
+            Assert.Equal(14, engine.Players[seat].Hand.Tiles.Count);
+            Assert.Equal(seat, engine.LastDrawSeat);
+            Assert.NotNull(engine.LastDrawnTile);
+            Assert.Contains(engine.LastDrawnTile!, engine.Players[seat].Hand.Tiles);
+            return;
+        }
+
+        Assert.Fail("No seed reached the human's discard.");
+    }
+
+    [Fact]
+    public void PlayTurn_IsNoOpWhileWaitingForHuman()
+    {
+        var engine = ToHumanDiscard(2, 0);
+        var turns = engine.Turns;
+        var tiles = engine.Players[0].Hand.Tiles.Count;
+
+        engine.PlayTurn();
+
+        Assert.True(engine.AwaitingHumanDiscard);
+        Assert.Equal(turns, engine.Turns);
+        Assert.Equal(tiles, engine.Players[0].Hand.Tiles.Count);
+    }
+
+    [Fact]
+    public void DiscardHuman_RemovesTileAndPassesTheTurn()
+    {
+        var engine = ToHumanDiscard(2, 0);
+        Assert.False(engine.IsFinished);
+        var tile = engine.Players[0].Hand.Tiles[0];
+
+        engine.DiscardHuman(tile);
+
+        Assert.Equal(13, engine.Players[0].Hand.Tiles.Count);
+        Assert.Equal(tile, engine.Players[0].Discards[^1]);
+        Assert.Equal(tile, engine.LastDiscard);
+        Assert.Equal(0, engine.LastDiscardSeat);
+        Assert.False(engine.AwaitingHumanDiscard);
+        if (!engine.IsFinished)
+        {
+            Assert.Equal(1, engine.CurrentSeat);
+        }
+    }
+
+    [Fact]
+    public void DiscardHuman_Throws_WhenNotWaiting()
+    {
+        var engine = NewEngine(1);
+        engine.StartRound();
+        Assert.Throws<InvalidOperationException>(() => engine.DiscardHuman(new Tile(Suit.Manzu, 1)));
+    }
+
+    [Fact]
+    public void DiscardHuman_Throws_ForTileNotInHand_AndKeepsWaiting()
+    {
+        var engine = ToHumanDiscard(2, 0);
+        var hand = engine.Players[0].Hand;
+        var missing = Enumerable.Range(0, 34).Select(Tile.FromTileIndex).First(t => !hand.Tiles.Contains(t));
+
+        Assert.Throws<ArgumentException>(() => engine.DiscardHuman(missing));
+
+        Assert.True(engine.AwaitingHumanDiscard);
+        Assert.Equal(14, hand.Tiles.Count);
+    }
+
+    [Fact]
+    public void FullRoundWithHumanPlayingSuggestedDiscards_AlwaysEnds()
+    {
+        for (var seed = 0; seed < 100; seed++)
+        {
+            var engine = NewEngine(seed);
+            engine.StartRound(seed % 4);
+
+            var guard = 0;
+            while (!engine.IsFinished)
+            {
+                Assert.True(guard++ < 500, "Round did not end.");
+                if (engine.AwaitingHumanDiscard)
+                {
+                    engine.DiscardHuman(engine.Players[engine.HumanSeat!.Value].Hand.SuggestDiscards()[0]);
+                }
+                else
+                {
+                    engine.PlayTurn();
+                }
+            }
+
+            Assert.InRange(engine.Turns, 1, 70);
+        }
+    }
+
+    [Fact]
+    public void Human_CanWinByTsumo_OrRon_WhenPlayingSuggestions()
+    {
+        // The suggestion always minimises shanten, so over many seeds the human must win some rounds.
+        var wins = 0;
+        for (var seed = 0; seed < 300; seed++)
+        {
+            var engine = NewEngine(seed);
+            engine.StartRound(0);
+            while (!engine.IsFinished)
+            {
+                if (engine.AwaitingHumanDiscard)
+                {
+                    engine.DiscardHuman(engine.Players[0].Hand.SuggestDiscards()[0]);
+                }
+                else
+                {
+                    engine.PlayTurn();
+                }
+            }
+
+            if (engine.Result!.WinnerSeat == 0)
+            {
+                wins++;
+                Assert.True(engine.Players[0].Hand.IsComplete());
+            }
+        }
+
+        Assert.True(wins > 0, "The human never won in 300 rounds.");
+    }
+
+    [Fact]
+    public void SuggestDiscards_AndShantenAfterDiscard_AgreeOnTenpai()
+    {
+        var hand = new PlayerHand();
+        foreach (var tile in new[]
+                 {
+                     new Tile(Suit.Manzu, 1), new Tile(Suit.Manzu, 2), new Tile(Suit.Manzu, 3),
+                     new Tile(Suit.Manzu, 4), new Tile(Suit.Manzu, 5), new Tile(Suit.Manzu, 6),
+                     new Tile(Suit.Manzu, 7), new Tile(Suit.Manzu, 8), new Tile(Suit.Manzu, 9),
+                     new Tile(Suit.Pinzu, 1), new Tile(Suit.Pinzu, 2),
+                     new Tile(Suit.Souzu, 1), new Tile(Suit.Souzu, 1),
+                     new Tile(Honor.East)
+                 })
+        {
+            hand.Add(tile);
+        }
+
+        var suggestions = hand.SuggestDiscards();
+
+        Assert.Equal(new Tile(Honor.East), Assert.Single(suggestions));
+        Assert.Equal(0, hand.ShantenAfterDiscard(new Tile(Honor.East)));
+        Assert.True(hand.ShantenAfterDiscard(new Tile(Suit.Manzu, 1)) > 0);
+        Assert.Throws<ArgumentException>(() => hand.ShantenAfterDiscard(new Tile(Suit.Souzu, 9)));
+    }
+}
+
 public class EngineTests
 {
     private static (RoundResult Result, string Log, GameEngine Engine) Run(int seed)

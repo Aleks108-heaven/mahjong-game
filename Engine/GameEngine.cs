@@ -40,6 +40,17 @@ public sealed class GameEngine
     public int? LastDiscardSeat { get; private set; }
     public Tile? WinningTile { get; private set; }
 
+    // The tile the current player (or the last one to draw) just drew, so a UI can point at it.
+    public Tile? LastDrawnTile { get; private set; }
+    public int? LastDrawSeat { get; private set; }
+
+    // Seat controlled by a person, or null when all four seats are bots.
+    public int? HumanSeat { get; private set; }
+
+    // True while the round is paused for the human to choose a discard (call DiscardHuman).
+    public bool AwaitingHumanDiscard =>
+        _started && !IsFinished && HumanSeat == _currentPlayerIndex && _state == TurnState.Discard;
+
     // Raised for every log line, so a UI can show the same text the console prints.
     public event Action<string>? Logged;
 
@@ -68,8 +79,17 @@ public sealed class GameEngine
     }
 
     // Deals a fresh round. Safe to call again to start another round with the same random stream.
-    public void StartRound()
+    // Pass a seat (0-3) to let a person choose that seat's discards; the other seats stay bots.
+    public void StartRound(int? humanSeat = null)
     {
+        if (humanSeat is < 0 or > 3)
+        {
+            throw new ArgumentOutOfRangeException(nameof(humanSeat), humanSeat, "Seat must be between 0 and 3.");
+        }
+
+        HumanSeat = humanSeat;
+        LastDrawnTile = null;
+        LastDrawSeat = null;
         _players.Clear();
         _discards.Clear();
         for (var i = 0; i < 4; i++)
@@ -97,7 +117,7 @@ public sealed class GameEngine
             throw new InvalidOperationException("Call StartRound() first.");
         }
 
-        if (IsFinished)
+        if (IsFinished || AwaitingHumanDiscard)
         {
             return;
         }
@@ -106,7 +126,39 @@ public sealed class GameEngine
         {
             Advance();
         }
-        while (!IsFinished && _state != TurnState.Draw);
+        while (!IsFinished && _state != TurnState.Draw && !AwaitingHumanDiscard);
+    }
+
+    // The human throws a tile from their hand; the turn then finishes (ron check) and passes on.
+    public void DiscardHuman(Tile tile)
+    {
+        if (!AwaitingHumanDiscard)
+        {
+            throw new InvalidOperationException("The engine is not waiting for a human discard.");
+        }
+
+        var player = _players[_currentPlayerIndex];
+        if (!player.Hand.Remove(tile))
+        {
+            throw new ArgumentException("The hand does not contain that tile.", nameof(tile));
+        }
+
+        CommitDiscard(player, tile);
+
+        while (!IsFinished && _state != TurnState.Draw)
+        {
+            Advance();
+        }
+    }
+
+    private void CommitDiscard(Player player, Tile discarded)
+    {
+        _discards.Add(discarded);
+        player.AddDiscard(discarded);
+        LastDiscard = discarded;
+        LastDiscardSeat = player.Seat;
+        Log($"     {Label(player)} discards {discarded} | discards so far {_discards.Count}");
+        _state = TurnState.WaitPhase;
     }
 
     // The wall is only checked when a new turn starts, so every turn that begins finishes.
@@ -126,6 +178,8 @@ public sealed class GameEngine
                 }
 
                 Turns++;
+                LastDrawnTile = tile;
+                LastDrawSeat = player.Seat;
                 player.Hand.Add(tile);
                 player.Hand.Sort();
                 Log($"T{Turns,-3} {Label(player)} draws {tile,-3} | {player.Hand} | shanten {player.Hand.GetShanten()} | wall {_wall.LiveCount}");
@@ -144,13 +198,13 @@ public sealed class GameEngine
                 break;
 
             case TurnState.Discard:
-                var discarded = player.Hand.DiscardBest(_rng);
-                _discards.Add(discarded);
-                player.AddDiscard(discarded);
-                LastDiscard = discarded;
-                LastDiscardSeat = player.Seat;
-                Log($"     {Label(player)} discards {discarded} | discards so far {_discards.Count}");
-                _state = TurnState.WaitPhase;
+                if (player.Seat == HumanSeat)
+                {
+                    // Paused: the human picks the tile through DiscardHuman.
+                    return;
+                }
+
+                CommitDiscard(player, player.Hand.DiscardBest(_rng));
                 break;
 
             case TurnState.WaitPhase:

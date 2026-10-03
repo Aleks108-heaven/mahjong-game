@@ -66,6 +66,34 @@ public sealed class PlayerHand
     // Discards the tile that leaves the lowest shanten; ties are broken randomly.
     public Tile DiscardBest(Random rng)
     {
+        var best = BestDiscardKinds();
+        var chosen = best[rng.Next(best.Count)];
+        var tile = _tiles.First(t => t.ToTileIndex() == chosen);
+        _tiles.Remove(tile);
+        return tile;
+    }
+
+    // Every distinct tile whose discard leaves the lowest shanten (used for hints).
+    public IReadOnlyList<Tile> SuggestDiscards()
+    {
+        return BestDiscardKinds().Select(Tile.FromTileIndex).ToList();
+    }
+
+    // Shanten of the hand after throwing away one copy of the given tile.
+    public int ShantenAfterDiscard(Tile tile)
+    {
+        var counts = ToTileCounts();
+        if (counts[tile.ToTileIndex()] == 0)
+        {
+            throw new ArgumentException("The hand does not contain that tile.", nameof(tile));
+        }
+
+        counts[tile.ToTileIndex()]--;
+        return _shantenCalculator.CalculateShanten(counts);
+    }
+
+    private List<int> BestDiscardKinds()
+    {
         var counts = ToTileCounts();
         var best = new List<int>();
         var bestShanten = int.MaxValue;
@@ -93,10 +121,7 @@ public sealed class PlayerHand
             }
         }
 
-        var chosen = best[rng.Next(best.Count)];
-        var tile = _tiles.First(t => t.ToTileIndex() == chosen);
-        _tiles.Remove(tile);
-        return tile;
+        return best;
     }
 
     private int[] ToTileCounts()

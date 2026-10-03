@@ -89,6 +89,40 @@
             </Setter>
         </Style>
 
+        <!-- Chrome-less button wrapping a tile: lifts on hover, white ring on keyboard focus. -->
+        <Style x:Key="TileButton" TargetType="Button">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Ring" BorderThickness="2" BorderBrush="Transparent" CornerRadius="7" Margin="-2">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Ring" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <TranslateTransform Y="-8"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Ring" Property="BorderBrush" Value="White"/>
+                                <Setter TargetName="Ring" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <TranslateTransform Y="-8"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="Chip" TargetType="Border">
             <Setter Property="Background" Value="#0F2F24"/>
             <Setter Property="BorderBrush" Value="{StaticResource PanelEdgeBrush}"/>
@@ -138,16 +172,33 @@
             </StackPanel>
         </Grid>
 
-        <!-- Result banner -->
-        <Border x:Name="ResultBanner" Grid.Row="1" Visibility="Collapsed" Background="{StaticResource GoldBrush}"
-                CornerRadius="10" Padding="18,12" Margin="0,0,0,14">
-            <StackPanel>
-                <TextBlock x:Name="ResultText" FontSize="20" FontWeight="Bold" Foreground="{StaticResource InkBrush}"
-                           TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
-                <TextBlock Text="Press New round (N) to deal again, or enter a seed to replay a round."
-                           FontSize="13" Foreground="#3B2F0E" Margin="0,2,0,0"/>
-            </StackPanel>
-        </Border>
+        <!-- Banners: "your move" while playing, result when the round ends -->
+        <StackPanel Grid.Row="1">
+            <Border x:Name="TurnBanner" Visibility="Collapsed" Background="#F2EFE6" CornerRadius="10"
+                    Padding="18,10" Margin="0,0,0,14">
+                <DockPanel>
+                    <Button x:Name="HintButton" DockPanel.Dock="Right" Content="Hint (H)" Style="{StaticResource ActionButton}"
+                            Padding="16,8" Click="HintButton_Click" VerticalAlignment="Center"
+                            ToolTip="Show the discard that keeps you closest to winning"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="YourMoveText" Text="Your move: click a tile to discard it."
+                                   FontSize="20" FontWeight="Bold" Foreground="{StaticResource InkBrush}"
+                                   AutomationProperties.LiveSetting="Polite"/>
+                        <TextBlock x:Name="HintMessage" FontSize="13" Foreground="#2C4A3D" Margin="0,2,0,0"
+                                   Text="Blue outline = the tile you just drew. Tab and Enter also work."/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <Border x:Name="ResultBanner" Visibility="Collapsed" Background="{StaticResource GoldBrush}"
+                    CornerRadius="10" Padding="18,12" Margin="0,0,0,14">
+                <StackPanel>
+                    <TextBlock x:Name="ResultText" FontSize="20" FontWeight="Bold" Foreground="{StaticResource InkBrush}"
+                               TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                    <TextBlock Text="Press New round (N) to deal again, or enter a seed to replay a round."
+                               FontSize="13" Foreground="#3B2F0E" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
 
         <!-- Table + sidebar -->
         <Grid Grid.Row="2">
@@ -178,13 +229,29 @@
                                 ValueChanged="SpeedSlider_ValueChanged" AutomationProperties.Name="Auto-play speed"/>
                         <Button x:Name="NewButton" Content="New round" Style="{StaticResource ActionButton}" Margin="0,14,0,0"
                                 Click="NewButton_Click" ToolTip="Deal a new round (N)"/>
-                        <TextBlock Text="SEED (OPTIONAL)" Style="{StaticResource SectionLabel}"/>
+                        <TextBlock Text="YOUR SEAT" Style="{StaticResource SectionLabel}" Margin="0,16,0,6"/>
+                        <UniformGrid x:Name="SeatPicker" Columns="5">
+                            <RadioButton x:Name="SeatWatch" Content="Watch" Tag="-1" GroupName="Seat" Style="{StaticResource ToggleAction}"
+                                         Padding="2,7" FontSize="12" Margin="0,0,3,0" Checked="Seat_Checked"
+                                         ToolTip="Spectate: four bots play"/>
+                            <RadioButton Content="East" Tag="0" GroupName="Seat" Style="{StaticResource ToggleAction}"
+                                         Padding="2,7" FontSize="12" Margin="0,0,3,0" Checked="Seat_Checked" IsChecked="True"/>
+                            <RadioButton Content="South" Tag="1" GroupName="Seat" Style="{StaticResource ToggleAction}"
+                                         Padding="2,7" FontSize="12" Margin="0,0,3,0" Checked="Seat_Checked"/>
+                            <RadioButton Content="West" Tag="2" GroupName="Seat" Style="{StaticResource ToggleAction}"
+                                         Padding="2,7" FontSize="12" Margin="0,0,3,0" Checked="Seat_Checked"/>
+                            <RadioButton Content="North" Tag="3" GroupName="Seat" Style="{StaticResource ToggleAction}"
+                                         Padding="2,7" FontSize="12" Checked="Seat_Checked"/>
+                        </UniformGrid>
+                        <TextBlock x:Name="SeatHint" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap"
+                                   Margin="0,4,0,0" Text="Picking a seat starts a new round. Bots' hands stay hidden."/>
+                        <TextBlock Text="SEED (OPTIONAL)" Style="{StaticResource SectionLabel}" Margin="0,14,0,6"/>
                         <TextBox x:Name="SeedBox" Background="#0F2F24" Foreground="{StaticResource TextBrush}"
                                  CaretBrush="White" BorderBrush="#4C8F76" BorderThickness="1.5" Padding="8,7" FontSize="14"
                                  AutomationProperties.Name="Seed" ToolTip="A whole number replays the same round"/>
                         <TextBlock x:Name="SeedHint" Text="Empty = random round. A number replays the same round."
                                    Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
-                        <CheckBox x:Name="ShowHands" Content="Show all hands" IsChecked="True" Margin="0,16,0,0"
+                        <CheckBox x:Name="ShowHands" Content="Show all hands" IsChecked="True" Margin="0,12,0,0"
                                   Foreground="{StaticResource TextBrush}" FontSize="14"
                                   Checked="ShowHands_Changed" Unchecked="ShowHands_Changed"/>
                         <TextBlock Text="GAME LOG" Style="{StaticResource SectionLabel}"/>
