@@ -47,10 +47,10 @@ public static class TileView
             Background = faceDown ? BackBrush : FaceBrush,
             BorderBrush = faceDown ? BackEdgeBrush : EdgeBrush,
             BorderThickness = new Thickness(1, 1, 1, 3),
-            ToolTip = faceDown ? "Hidden tile" : Describe(tile)
+            ToolTip = faceDown ? Loc.T("Hidden tile") : Describe(tile)
         };
 
-        AutomationProperties.SetName(border, faceDown ? "Hidden tile" : Describe(tile));
+        AutomationProperties.SetName(border, faceDown ? Loc.T("Hidden tile") : Describe(tile));
 
         if (mark != TileMark.None && !faceDown)
         {
@@ -76,7 +76,7 @@ public static class TileView
     {
         if (tile.IsHonor)
         {
-            return $"{tile.Honor} ({tile})";
+            return $"{Loc.T(tile.Honor!.Value.ToString())} ({tile})";
         }
 
         var suit = tile.Suit switch
@@ -86,7 +86,7 @@ public static class TileView
             _ => "bamboo"
         };
 
-        return $"{tile.Rank} of {suit} ({tile})";
+        return Loc.T("{0} of {1} ({2})", tile.Rank, Loc.T(suit), tile);
     }
 
     private static UIElement BuildFace(Tile tile, double width)

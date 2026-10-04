@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private const double MeldTileWidth = 28;
 
     private static readonly string[] SeatNames = { "East", "South", "West", "North" };
+    private static readonly string[] SeatNamesShort = { "Схід", "Півд.", "Зах.", "Півн." };
     private static readonly string[] WindKanji = { "東", "南", "西", "北" };
 
     private static readonly Brush PanelBrush = Frozen("#1B4D3C");
@@ -53,6 +54,7 @@ public partial class MainWindow : Window
             PlayerGrid.Children.Add(panel.Root);
         }
 
+        ApplyLanguage();
         _timer.Interval = TimeSpan.FromMilliseconds(SpeedSlider.Value);
         _timer.Tick += (_, _) => OnTimerTick();
         Loaded += (_, _) => StartFromCommandLine();
@@ -114,13 +116,13 @@ public partial class MainWindow : Window
         }
         else if (!int.TryParse(text, out _seed))
         {
-            SeedHint.Text = "Seed must be a whole number, for example 7.";
+            SeedHint.Text = Loc.T("Seed must be a whole number, for example 7.");
             SeedHint.Foreground = ErrorColour;
             SeedBox.Focus();
             return;
         }
 
-        SeedHint.Text = "Empty = random round. A number replays the same round.";
+        SeedHint.Text = Loc.T("Empty = random round. A number replays the same round.");
         SeedHint.Foreground = MutedColour;
 
         LogBox.Clear();
@@ -283,10 +285,10 @@ public partial class MainWindow : Window
         var awaiting = _engine.AwaitingHumanDiscard;
         var awaitingCall = _engine.AwaitingHumanCall;
 
-        TurnText.Text = $"Turn {_engine.Turns}";
+        TurnText.Text = Loc.T("Turn {0}", _engine.Turns);
         ShowDora();
-        WallText.Text = $"Wall {_engine.WallRemaining} left";
-        SeedText.Text = $"Seed {_seed}";
+        WallText.Text = Loc.T("Wall {0} left", _engine.WallRemaining);
+        SeedText.Text = Loc.T("Seed {0}", _seed);
 
         foreach (var panel in _panels)
         {
@@ -303,7 +305,7 @@ public partial class MainWindow : Window
             var drawnIndex = canClick ? FindLastIndex(player.Hand.Tiles, _engine.LastDrawnTile!) : -1;
             var hints = canClick && _showHint ? _engine.SuggestHumanDiscards() : new List<Tile>();
 
-            panel.Title.Text = $"Player {panel.Seat + 1} · {SeatNames[panel.Seat]}" + (isYou ? " · You" : string.Empty);
+            panel.Title.Text = Loc.T("Player {0} · {1}", panel.Seat + 1, SeatName(panel.Seat)) + (isYou ? Loc.T(" · You") : string.Empty);
 
             panel.Hand.Children.Clear();
             for (var i = 0; i < player.Hand.Tiles.Count; i++)
@@ -341,30 +343,30 @@ public partial class MainWindow : Window
                 panel.River.Children.Add(TileView.Create(player.Discards[i], RiverTileWidth, false, mark));
             }
 
-            panel.RiverCount.Text = $"Discards ({player.Discards.Count})";
+            panel.RiverCount.Text = Loc.T("Discards ({0})", player.Discards.Count);
 
             if (isWinner)
             {
-                panel.Status.Text = result!.Outcome == RoundOutcome.Tsumo ? "WINNER · Tsumo" : "WINNER · Ron";
+                panel.Status.Text = Loc.T(result!.Outcome == RoundOutcome.Tsumo ? "WINNER · Tsumo" : "WINNER · Ron");
                 panel.Status.Foreground = GoldColour;
             }
             else if (reveal)
             {
                 var shanten = player.Hand.GetShanten();
                 var furiten = shanten == 0 && player.Hand.TotalTiles == 13 && _engine.IsFuriten(panel.Seat);
-                panel.Status.Text = furiten ? "Tenpai · Furiten" : shanten == 0 ? "Tenpai" : $"Shanten {shanten}";
+                panel.Status.Text = furiten ? Loc.T("Tenpai · Furiten") : shanten == 0 ? Loc.T("Tenpai") : Loc.T("Shanten {0}", shanten);
                 panel.Status.Foreground = shanten == 0 ? GoldColour : MutedColour;
             }
             else
             {
-                panel.Status.Text = "Hand hidden";
+                panel.Status.Text = Loc.T("Hand hidden");
                 panel.Status.Foreground = MutedColour;
             }
 
             panel.Turn.Text = canClick
-                ? "▶ Your move"
+                ? Loc.T("▶ Your move")
                 : isNext
-                    ? (_engine.NextActionIsDraw ? "▶ Draws next" : "▶ Discards next")
+                    ? Loc.T(_engine.NextActionIsDraw ? "▶ Draws next" : "▶ Discards next")
                     : string.Empty;
             panel.Root.BorderBrush = isWinner ? WinnerEdge : isNext ? NextEdge : isYou ? YouEdge : PanelEdge;
             panel.Root.BorderThickness = new Thickness(isWinner || isNext ? 3 : isYou ? 2 : 1);
@@ -373,7 +375,7 @@ public partial class MainWindow : Window
         var spectating = human is null;
         NextButton.IsEnabled = !finished && spectating;
         AutoButton.IsEnabled = !finished && spectating;
-        SpeedLabel.Text = $"Speed: {(int)SpeedSlider.Value} ms per {(spectating ? "turn" : "bot turn")}";
+        SpeedLabel.Text = Loc.T(spectating ? "Speed: {0} ms per turn" : "Speed: {0} ms per bot turn", (int)SpeedSlider.Value);
 
         ShowTurnBanner(awaiting);
         ShowCallBanner(awaitingCall);
@@ -409,7 +411,7 @@ public partial class MainWindow : Window
         }
     }
 
-    // A set of three face-up tiles in a dark tray; the called tile has an orange outline.
+    // A set of three or four face-up tiles in a dark tray; the called tile has an orange outline.
     private static FrameworkElement MeldView(Meld meld)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal };
@@ -426,17 +428,17 @@ public partial class MainWindow : Window
             row.Children.Add(TileView.Create(tile, MeldTileWidth, faceDown, isCalled ? TileMark.LastDiscard : TileMark.None));
         }
 
-        var kind = meld.Type switch
+        var kind = Loc.T(meld.Type switch
         {
             MeldType.Pon => "Pon",
             MeldType.Chi => "Chi",
             MeldType.Ankan => "Closed kan",
             MeldType.Kakan => "Added kan",
             _ => "Open kan"
-        };
+        });
         var description = meld.Type == MeldType.Ankan
-            ? $"{kind} of {meld.CalledTile}"
-            : $"{kind} of {string.Join(" ", meld.Tiles)}, called {meld.CalledTile} from Player {meld.FromSeat + 1}";
+            ? Loc.T("{0} of {1}", kind, meld.CalledTile)
+            : Loc.T("{0} of {1}, called {2} from Player {3}", kind, string.Join(" ", meld.Tiles), meld.CalledTile, meld.FromSeat + 1);
         var tray = new Border
         {
             Background = Frozen("#12372B"),
@@ -449,7 +451,6 @@ public partial class MainWindow : Window
         AutomationProperties.SetName(tray, description);
         return tray;
     }
-
     private void ShowCallBanner(bool awaitingCall)
     {
         CallBanner.Visibility = awaitingCall ? Visibility.Visible : Visibility.Collapsed;
@@ -460,39 +461,39 @@ public partial class MainWindow : Window
         }
 
         var call = _engine.PendingCall!;
-        CallTitle.Text = $"{SeatLabel(call.FromSeat)} discarded {TileView.Describe(call.Discard)}. Call it?";
+        CallTitle.Text = Loc.T("{0} discarded {1}. Call it?", SeatLabel(call.FromSeat), TileView.Describe(call.Discard));
 
         var options = new List<string>();
         if (call.CanPon)
         {
-            options.Add("pon (three of a kind)");
-            CallButtons.Children.Add(CallButton("Pon (P)", () => OnPon(), primary: true));
+            options.Add(Loc.T("pon (three of a kind)"));
+            CallButtons.Children.Add(CallButton(Loc.T("Pon (P)"), () => OnPon(), primary: true));
         }
 
         if (call.CanKan)
         {
-            options.Add("kan (four of a kind; you then draw a replacement tile)");
-            CallButtons.Children.Add(CallButton("Kan (K)", () => OnKan(), primary: false));
+            options.Add(Loc.T("kan (four of a kind; you then draw a replacement tile)"));
+            CallButtons.Children.Add(CallButton(Loc.T("Kan (K)"), () => OnKan(), primary: false));
         }
 
         for (var i = 0; i < call.ChiOptions.Count; i++)
         {
             var option = call.ChiOptions[i];
             var tiles = new[] { call.Discard, option.A, option.B }.OrderBy(t => t).ToList();
-            var label = $"Chi {string.Join(" ", tiles)}" + (i == 0 ? " (C)" : string.Empty);
+            var label = Loc.T("Chi {0}", string.Join(" ", tiles)) + (i == 0 ? " (C)" : string.Empty);
             if (i == 0)
             {
-                options.Add("chi (a run)");
+                options.Add(Loc.T("chi (a run)"));
             }
 
             CallButtons.Children.Add(CallButton(label, () => OnChi(option), primary: !call.CanPon && i == 0));
         }
 
-        CallButtons.Children.Add(CallButton("Pass (S)", () => OnPass(), primary: false));
-        CallHint.Text = $"You can {string.Join(" or ", options)}. Calling takes the tile and you discard next; "
-            + "the called tile stays locked. Pass is the focused default.";
+        CallButtons.Children.Add(CallButton(Loc.T("Pass (S)"), () => OnPass(), primary: false));
+        CallHint.Text = Loc.T(
+            "You can {0}. Calling takes the tile and you discard next; the called tile stays locked. Pass is the focused default.",
+            string.Join(Loc.T(" or "), options));
     }
-
     private Button CallButton(string text, Action onClick, bool primary)
     {
         var button = new Button
@@ -512,32 +513,31 @@ public partial class MainWindow : Window
         var after = hand.ShantenAfterDiscard(tile);
         var outcome = after switch
         {
-            < 0 => "completes your hand",
-            0 => "tenpai",
-            _ => $"shanten {after}"
+            < 0 => Loc.T("completes your hand"),
+            0 => Loc.T("tenpai"),
+            _ => Loc.T("shanten {0}", after)
         };
 
         var button = new Button
         {
             Content = TileView.Create(tile, HandTileWidth, false, mark),
             Style = (Style)FindResource("TileButton"),
-            ToolTip = $"Discard {description}: {outcome}"
+            ToolTip = Loc.T("Discard {0}: {1}", description, outcome)
         };
-        AutomationProperties.SetName(button, $"Discard {description}");
+        AutomationProperties.SetName(button, Loc.T("Discard {0}", description));
 
         if (!_engine.IsDiscardAllowed(tile))
         {
             // Swap-calling rule: the tile you just called (or its mirror in a chi) is locked this turn.
             button.IsEnabled = false;
             button.Opacity = 0.4;
-            button.ToolTip = $"{description} is locked: you can't discard it right after calling";
-            AutomationProperties.SetName(button, $"{description}, locked this turn");
+            button.ToolTip = Loc.T("{0} is locked: you can't discard it right after calling", description);
+            AutomationProperties.SetName(button, Loc.T("{0}, locked this turn", description));
         }
 
         button.Click += (_, _) => OnTileChosen(tile);
         return button;
     }
-
     private Button? FirstHandButton()
     {
         return _panels[_engine.HumanSeat!.Value].Hand.Children.OfType<Button>().FirstOrDefault(b => b.IsEnabled);
@@ -560,37 +560,35 @@ public partial class MainWindow : Window
         KanButtons.Children.Clear();
         foreach (var option in _engine.HumanKanOptions)
         {
-            var label = option.Type == MeldType.Ankan ? $"Closed kan {option.Tile}" : $"Add {option.Tile} to pon";
+            var label = option.Type == MeldType.Ankan ? Loc.T("Closed kan {0}", option.Tile) : Loc.T("Add {0} to pon", option.Tile);
             KanButtons.Children.Add(CallButton(label + (KanButtons.Children.Count == 0 ? " (K)" : string.Empty), () => OnDeclareKan(option), primary: false));
         }
 
         var hand = _engine.Players[_engine.HumanSeat!.Value].Hand;
         var called = _engine.ForbiddenDiscards.Count > 0;
         YourMoveText.Text = called
-            ? "You called: now discard a tile."
-            : "Your move: click a tile to discard it.";
+            ? Loc.T("You called: now discard a tile.")
+            : Loc.T("Your move: click a tile to discard it.");
 
         if (_showHint)
         {
             var suggestions = _engine.SuggestHumanDiscards();
             var best = hand.ShantenAfterDiscard(suggestions[0]);
-            var goal = best == 0 ? "tenpai" : $"shanten {best}";
-            HintMessage.Text = $"Suggested: {string.Join(", ", suggestions)} (keeps you at {goal}). Green outline marks them.";
+            var goal = best == 0 ? Loc.T("tenpai") : Loc.T("shanten {0}", best);
+            HintMessage.Text = Loc.T("Suggested: {0} (keeps you at {1}). Green outline marks them.", string.Join(", ", suggestions), goal);
         }
         else if (called)
         {
             var lastMeld = hand.Melds[^1];
             HintMessage.Text = lastMeld.Type == MeldType.Pon
-                ? $"You can't discard the {lastMeld.CalledTile} you just called, and the dimmed tiles are locked this turn."
-                : "Dimmed tiles are locked this turn: you can't discard the tile you just called, "
-                  + "or the other end of the same run.";
+                ? Loc.T("You can't discard the {0} you just called, and the dimmed tiles are locked this turn.", lastMeld.CalledTile)
+                : Loc.T("Dimmed tiles are locked this turn: you can't discard the tile you just called, or the other end of the same run.");
         }
         else
         {
-            HintMessage.Text = "Blue outline = the tile you just drew. Hover a tile to see where it leaves you. Tab and Enter also work.";
+            HintMessage.Text = Loc.T("Blue outline = the tile you just drew. Hover a tile to see where it leaves you. Tab and Enter also work.");
         }
     }
-
     private void ShowDora()
     {
         DoraTiles.Children.Clear();
@@ -612,16 +610,18 @@ public partial class MainWindow : Window
         ResultText.Text = result.Outcome switch
         {
             RoundOutcome.Tsumo =>
-                $"{SeatLabel(result.WinnerSeat!.Value)} wins by tsumo (self-drawn) on turn {result.Turns}.",
+                Loc.T("{0} wins by tsumo (self-drawn) on turn {1}.", SeatLabel(result.WinnerSeat!.Value), result.Turns),
             RoundOutcome.Ron =>
-                $"{SeatLabel(result.WinnerSeat!.Value)} wins by ron on {TileView.Describe(_engine.WinningTile!)}, " +
-                $"discarded by {SeatLabel(result.LoserSeat!.Value)}, on turn {result.Turns}.",
-            _ => $"Exhaustive draw: the wall ran out after {result.Turns} turns and nobody won."
+                Loc.T("{0} wins by ron on {1}, discarded by {2}, on turn {3}.",
+                    SeatLabel(result.WinnerSeat!.Value), TileView.Describe(_engine.WinningTile!),
+                    SeatLabel(result.LoserSeat!.Value), result.Turns),
+            _ => Loc.T("Exhaustive draw: the wall ran out after {0} turns and nobody won.", result.Turns)
         };
+
         if (_engine.WinningYaku is { } yaku)
         {
-            var dora = _engine.WinningDora > 0 ? $" · dora {_engine.WinningDora}" : string.Empty;
-            ResultYaku.Text = $"{yaku} = {yaku.Han} han{dora}";
+            var dora = _engine.WinningDora > 0 ? Loc.T(" · dora {0}", _engine.WinningDora) : string.Empty;
+            ResultYaku.Text = Loc.T("{0} = {1} han", Loc.YakuText(yaku), yaku.Han) + dora;
             ResultYaku.Visibility = Visibility.Visible;
         }
         else
@@ -631,13 +631,80 @@ public partial class MainWindow : Window
 
         ResultBanner.Visibility = Visibility.Visible;
     }
-
     private string SeatLabel(int seat)
     {
-        var you = HumanSeat == seat ? " - you" : string.Empty;
-        return $"Player {seat + 1} ({SeatNames[seat]}{you})";
+        var you = HumanSeat == seat ? Loc.T(" - you") : string.Empty;
+        return Loc.T("Player {0} ({1}{2})", seat + 1, SeatName(seat), you);
     }
 
+    private static string SeatName(int seat)
+    {
+        return Loc.T(SeatNames[seat]);
+    }
+
+    // Applies the chosen language to every fixed label in the window, then redraws the table.
+    private void ApplyLanguage()
+    {
+        Title = Loc.T("Mahjong Table");
+        TitleText.Text = Loc.T("Mahjong Table");
+        SubtitleText.Text = Loc.T("Riichi engine · four bots play one round");
+        DoraLabel.Text = Loc.T("Dora");
+        HintButton.Content = Loc.T("Hint (H)");
+        HintButton.ToolTip = Loc.T("Show the discard that keeps you closest to winning");
+        ControlsLabel.Text = Loc.T("CONTROLS");
+        NextButton.Content = Loc.T("Next turn  ▶");
+        NextButton.ToolTip = Loc.T("Play one full turn (Right arrow)");
+        AutoButton.Content = Loc.T("Auto-play");
+        AutoButton.ToolTip = Loc.T("Play turns automatically (A)");
+        NewButton.Content = Loc.T("New round");
+        NewButton.ToolTip = Loc.T("Deal a new round (N)");
+        YourSeatLabel.Text = Loc.T("YOUR SEAT");
+        foreach (RadioButton radio in SeatPicker.Children)
+        {
+            var seat = int.Parse((string)radio.Tag);
+            radio.Content = seat < 0
+                ? Loc.T("Watch")
+                : Loc.IsUkrainian ? SeatNamesShort[seat] : SeatNames[seat];
+        }
+
+        SeatWatch.ToolTip = Loc.T("Spectate: four bots play");
+        SeatHint.Text = Loc.T("Picking a seat starts a new round. Bots' hands stay hidden.");
+        LangLabel.Text = Loc.T("LANGUAGE");
+        SeedLabel.Text = Loc.T("SEED (OPTIONAL)");
+        SeedBox.ToolTip = Loc.T("A whole number replays the same round");
+        AutomationProperties.SetName(SeedBox, Loc.T("Seed"));
+        SeedHint.Text = Loc.T("Empty = random round. A number replays the same round.");
+        SeedHint.Foreground = MutedColour;
+        ShowHands.Content = Loc.T("Show all hands");
+        LogLabel.Text = Loc.T("GAME LOG");
+        AutomationProperties.SetName(LogBox, Loc.T("Game log"));
+        AutomationProperties.SetName(SpeedSlider, Loc.T("Auto-play speed"));
+        KeysText.Text = Loc.T("Keys: → next turn · A auto-play · N new round");
+        ResultFooter.Text = Loc.T("Press New round (N) to deal again, or enter a seed to replay a round.");
+        SpeedSlider_ValueChanged(SpeedSlider, null!);
+
+        if (_engine is not null)
+        {
+            Refresh();
+        }
+    }
+
+    private void Lang_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_ready)
+        {
+            return;
+        }
+
+        var wanted = LangUk.IsChecked == true ? Lang.Uk : Lang.En;
+        if (Loc.Current == wanted)
+        {
+            return;
+        }
+
+        Loc.Current = wanted;
+        ApplyLanguage();
+    }
     private static int FindLastIndex(IReadOnlyList<Tile> tiles, Tile tile)
     {
         for (var i = tiles.Count - 1; i >= 0; i--)
@@ -709,7 +776,7 @@ public partial class MainWindow : Window
         if (SpeedLabel is not null)
         {
             var spectating = _engine is null || _engine.HumanSeat is null;
-            SpeedLabel.Text = $"Speed: {ms} ms per {(spectating ? "turn" : "bot turn")}";
+            SpeedLabel.Text = Loc.T(spectating ? "Speed: {0} ms per turn" : "Speed: {0} ms per bot turn", ms);
         }
     }
 

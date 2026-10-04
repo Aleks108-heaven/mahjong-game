@@ -51,6 +51,7 @@ Run the test suite:
 ```powershell
 dotnet test Tests
 ```
+
 A non-integer seed in the console version prints a usage message and exits with code 1.
 
 ## Desktop app (Mahjong Table)
@@ -74,7 +75,7 @@ Other players' hands start face-down while you play (tick *Show all hands* to pe
 ### Controls
 
 | Control | What it does |
-|---|---|
+| --- | --- |
 | **Your seat** | Seat to play, or Watch to spectate. Changing it starts a new round. |
 | **Hint** (H) | Shows the best discards for your current hand (locked tiles excluded) |
 | **Pon** (P) / **Chi** (C) / **Kan** (K) / **Pass** (S) | Answer a call prompt (K also declares your own kan when offered) |
@@ -83,6 +84,7 @@ Other players' hands start face-down while you play (tick *Show all hands* to pe
 | **Speed slider** | 100-1500 ms per turn (spectating) or per bot turn (playing) |
 | **New round** (`N`) | Deals again. A whole-number seed replays the same round; empty means random. |
 | **Show all hands** | Face-up or face-down for the other players |
+| **Language** | English or Українська (Ukrainian, the default). Translates the window; the game log stays English. |
 | **Game log** | The same text the console version prints |
 
 On screen:
@@ -119,7 +121,7 @@ Each draw line shows the turn number, seat and wind, the tile drawn, the full 14
 Standard riichi notation:
 
 | Tiles | Notation |
-|---|---|
+| --- | --- |
 | Characters (manzu) | `1m`-`9m` |
 | Circles (pinzu) | `1p`-`9p` |
 | Bamboo (souzu) | `1s`-`9s` |
@@ -128,7 +130,7 @@ Standard riichi notation:
 ## How it works
 
 | File | Role |
-|---|---|
+| --- | --- |
 | [Engine/Tile.cs](Engine/Tile.cs) | Immutable tile with validation, value equality and a 0-33 index |
 | [Engine/Meld.cs](Engine/Meld.cs) | Melds (chi, pon, three kinds of kan), chi and kan options, call options for the human, and the swap-calling lock |
 | [Engine/Wall.cs](Engine/Wall.cs) | 136 tiles, Fisher-Yates shuffle, 122 live + 14 dead (4 kan replacement tiles, 5 dora indicators, 5 spare). Each kan tops the dead wall up from the live wall. `Wall.Stacked` builds a chosen deal for tests. |
@@ -187,7 +189,7 @@ CI runs on every push and pull request ([.github/workflows/ci.yml](.github/workf
 An initial review (source review plus runtime checks) found these issues, all now fixed:
 
 | # | Severity | Issue | Fix |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | High | No win detection; bots threw away complete hands | Tsumo and ron added; discards minimise shanten |
 | 2 | Medium | Last player never discarded | Wall checked only at turn start |
 | 3 | Medium | `Tile` accepted invalid ranks (`Tile(Manzu,10)` collided with 1p, rank 0 gave index -1) | Constructor validation |
