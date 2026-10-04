@@ -8,14 +8,49 @@ A riichi mahjong engine in C# (.NET 10) with a console simulation: four bot play
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download). The desktop app needs Windows.
 
+### Step 1: open a terminal in the project folder
+
+Open PowerShell (press the Windows key, type `PowerShell`, press Enter). A new terminal starts in your user folder, not in the game, so first move into the game folder with `cd` (change directory):
+
 ```powershell
-Play.cmd                                     # desktop app (double-click it, or run it)
-dotnet run --project Wpf\MahjongTable.csproj # same, without the batch file
-dotnet run                                   # console version, random round
-dotnet run -- 7                              # console version, reproducible round (seed 7)
-dotnet test Tests                            # run the test suite
+cd "C:\path\to\Mahjong Game"
 ```
 
+Change the path if you keep the project somewhere else. Keep the quotes because the folder name has a space. Every command below must be run from this folder, one command at a time. Don't paste the `#` comments.
+
+### Step 2: start the game
+
+Desktop app (a window opens; the first start builds it, so it can take a few seconds):
+
+```powershell
+.\Play.cmd
+```
+
+PowerShell only runs a program in the current folder if you write `.\` in front of it. In Command Prompt (`cmd`) you can type `Play.cmd` without it, and in File Explorer you can just double-click `Play.cmd`.
+
+If you prefer not to use the batch file, this does the same:
+
+```powershell
+dotnet run --project Wpf\MahjongTable.csproj -c Release
+```
+
+Console version (four bots play one round as text, no window):
+
+```powershell
+dotnet run
+```
+
+Same console round every time, using seed 7 (any whole number works):
+
+```powershell
+dotnet run -- 7
+```
+
+Run the test suite:
+
+```powershell
+dotnet test Tests
+```
 A non-integer seed in the console version prints a usage message and exits with code 1.
 
 ## Desktop app (Mahjong Table)
