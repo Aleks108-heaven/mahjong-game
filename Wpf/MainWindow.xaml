@@ -160,6 +160,13 @@
                 <TextBlock Text="Riichi engine · four bots play one round" FontSize="14" Foreground="{StaticResource MutedBrush}"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Style="{StaticResource Chip}" AutomationProperties.Name="Dora indicators">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Dora" Foreground="{StaticResource TextBrush}" FontSize="14" FontWeight="SemiBold"
+                                   VerticalAlignment="Center"/>
+                        <StackPanel x:Name="DoraTiles" Orientation="Horizontal" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
                 <Border Style="{StaticResource Chip}">
                     <TextBlock x:Name="TurnText" Text="Turn 0" Foreground="{StaticResource TextBrush}" FontSize="14" FontWeight="SemiBold"/>
                 </Border>
@@ -180,6 +187,7 @@
                     <Button x:Name="HintButton" DockPanel.Dock="Right" Content="Hint (H)" Style="{StaticResource ActionButton}"
                             Padding="16,8" Click="HintButton_Click" VerticalAlignment="Center"
                             ToolTip="Show the discard that keeps you closest to winning"/>
+                    <StackPanel x:Name="KanButtons" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"/>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock x:Name="YourMoveText" Text="Your move: click a tile to discard it."
                                    FontSize="20" FontWeight="Bold" Foreground="{StaticResource InkBrush}"
@@ -206,6 +214,8 @@
                 <StackPanel>
                     <TextBlock x:Name="ResultText" FontSize="20" FontWeight="Bold" Foreground="{StaticResource InkBrush}"
                                TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                    <TextBlock x:Name="ResultYaku" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"
+                               TextWrapping="Wrap" Margin="0,4,0,0"/>
                     <TextBlock Text="Press New round (N) to deal again, or enter a seed to replay a round."
                                FontSize="13" Foreground="#3B2F0E" Margin="0,2,0,0"/>
                 </StackPanel>

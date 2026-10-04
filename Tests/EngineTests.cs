@@ -257,7 +257,7 @@ public class StepApiTests
             }
 
             // No extra "failed draw" turn is needed: the round ends right after turn 70.
-            Assert.Equal(70, engine.Turns);
+            Assert.Equal(70 - engine.KanCount, engine.Turns);
             Assert.Equal(0, engine.WallRemaining);
             return;
         }
@@ -949,7 +949,7 @@ public class HumanCallTests
                 HumanSeatTests.HumanStep(engine, takeCalls: true);
             }
 
-            var inHands = engine.Players.Sum(p => p.Hand.TotalTiles);
+            var inHands = engine.Players.Sum(p => p.Hand.PhysicalTileCount);
             var inRivers = engine.Players.Sum(p => p.Discards.Count);
             var expected = 136 + (engine.Result!.Outcome == RoundOutcome.Ron ? 1 : 0);
             Assert.Equal(expected, inHands + inRivers + engine.WallRemaining + 14);
@@ -1023,8 +1023,10 @@ public class EngineTests
             var (result, _, engine) = Run(seed);
             if (result.Outcome == RoundOutcome.ExhaustiveDraw)
             {
-                Assert.Equal(70, result.Turns);
-                Assert.Equal(70 + engine.CallCount, engine.Discards.Count);
+                // Every kan shortens the live wall by one tile. A call (pon, chi, open kan) adds a discard;
+                // a closed or added kan does not, since the replacement draw still ends in one discard.
+                Assert.Equal(70 - engine.KanCount, result.Turns);
+                Assert.Equal(result.Turns + engine.CallCount, engine.Discards.Count);
                 return;
             }
         }
@@ -1040,7 +1042,7 @@ public class EngineTests
         for (var seed = 0; seed < 300; seed++)
         {
             var (result, _, engine) = Run(seed);
-            var inHands = engine.Players.Sum(p => p.Hand.TotalTiles);
+            var inHands = engine.Players.Sum(p => p.Hand.PhysicalTileCount);
             var inRivers = engine.Players.Sum(p => p.Discards.Count);
             var expected = 136 + (result.Outcome == RoundOutcome.Ron ? 1 : 0);
 
@@ -1062,10 +1064,10 @@ public class EngineTests
                 Assert.True(player.Hand.MeldCount <= 4);
                 foreach (var meld in player.Hand.Melds)
                 {
-                    Assert.Equal(3, meld.Tiles.Count);
+                    Assert.Equal(meld.IsKan ? 4 : 3, meld.Tiles.Count);
                     Assert.NotEqual(player.Seat, meld.FromSeat);
                     Assert.Contains(meld.CalledTile, meld.Tiles);
-                    if (meld.Type == MeldType.Pon)
+                    if (meld.IsTriplet)
                     {
                         Assert.All(meld.Tiles, t => Assert.Equal(meld.CalledTile, t));
                     }

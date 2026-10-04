@@ -11,7 +11,6 @@ namespace MahjongTable;
 
 public partial class MainWindow : Window
 {
-    private const int MaxTurns = 70;
     private const double HandTileWidth = 34;
     private const double RiverTileWidth = 30;
     private const double MeldTileWidth = 28;
@@ -227,6 +226,28 @@ public partial class MainWindow : Window
         ResumeAfterHumanAction();
     }
 
+    private void OnKan()
+    {
+        if (!_engine.AwaitingHumanCall || !_engine.PendingCall!.CanKan)
+        {
+            return;
+        }
+
+        _engine.HumanKan();
+        ResumeAfterHumanAction();
+    }
+
+    private void OnDeclareKan(KanOption option)
+    {
+        if (!_engine.AwaitingHumanDiscard)
+        {
+            return;
+        }
+
+        _engine.HumanDeclareKan(option);
+        ResumeAfterHumanAction();
+    }
+
     private void OnPass()
     {
         if (!_engine.AwaitingHumanCall)
@@ -262,7 +283,8 @@ public partial class MainWindow : Window
         var awaiting = _engine.AwaitingHumanDiscard;
         var awaitingCall = _engine.AwaitingHumanCall;
 
-        TurnText.Text = $"Turn {_engine.Turns} / {MaxTurns}";
+        TurnText.Text = $"Turn {_engine.Turns}";
+        ShowDora();
         WallText.Text = $"Wall {_engine.WallRemaining} left";
         SeedText.Text = $"Seed {_seed}";
 
@@ -329,7 +351,8 @@ public partial class MainWindow : Window
             else if (reveal)
             {
                 var shanten = player.Hand.GetShanten();
-                panel.Status.Text = shanten == 0 ? "Tenpai" : $"Shanten {shanten}";
+                var furiten = shanten == 0 && player.Hand.TotalTiles == 13 && _engine.IsFuriten(panel.Seat);
+                panel.Status.Text = furiten ? "Tenpai · Furiten" : shanten == 0 ? "Tenpai" : $"Shanten {shanten}";
                 panel.Status.Foreground = shanten == 0 ? GoldColour : MutedColour;
             }
             else
@@ -391,15 +414,29 @@ public partial class MainWindow : Window
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         var calledShown = false;
-        foreach (var tile in meld.Tiles)
+        for (var i = 0; i < meld.Tiles.Count; i++)
         {
-            var isCalled = !calledShown && tile.Equals(meld.CalledTile);
+            var tile = meld.Tiles[i];
+            var closedKan = meld.Type == MeldType.Ankan;
+            var isCalled = !closedKan && !calledShown && tile.Equals(meld.CalledTile);
             calledShown |= isCalled;
-            row.Children.Add(TileView.Create(tile, MeldTileWidth, false, isCalled ? TileMark.LastDiscard : TileMark.None));
+
+            // A closed kan shows its two outer tiles face-down, as at a real table.
+            var faceDown = closedKan && (i == 0 || i == 3);
+            row.Children.Add(TileView.Create(tile, MeldTileWidth, faceDown, isCalled ? TileMark.LastDiscard : TileMark.None));
         }
 
-        var kind = meld.Type == MeldType.Pon ? "Pon" : "Chi";
-        var description = $"{kind} of {string.Join(" ", meld.Tiles)}, called {meld.CalledTile} from Player {meld.FromSeat + 1}";
+        var kind = meld.Type switch
+        {
+            MeldType.Pon => "Pon",
+            MeldType.Chi => "Chi",
+            MeldType.Ankan => "Closed kan",
+            MeldType.Kakan => "Added kan",
+            _ => "Open kan"
+        };
+        var description = meld.Type == MeldType.Ankan
+            ? $"{kind} of {meld.CalledTile}"
+            : $"{kind} of {string.Join(" ", meld.Tiles)}, called {meld.CalledTile} from Player {meld.FromSeat + 1}";
         var tray = new Border
         {
             Background = Frozen("#12372B"),
@@ -430,6 +467,12 @@ public partial class MainWindow : Window
         {
             options.Add("pon (three of a kind)");
             CallButtons.Children.Add(CallButton("Pon (P)", () => OnPon(), primary: true));
+        }
+
+        if (call.CanKan)
+        {
+            options.Add("kan (four of a kind; you then draw a replacement tile)");
+            CallButtons.Children.Add(CallButton("Kan (K)", () => OnKan(), primary: false));
         }
 
         for (var i = 0; i < call.ChiOptions.Count; i++)
@@ -514,6 +557,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        KanButtons.Children.Clear();
+        foreach (var option in _engine.HumanKanOptions)
+        {
+            var label = option.Type == MeldType.Ankan ? $"Closed kan {option.Tile}" : $"Add {option.Tile} to pon";
+            KanButtons.Children.Add(CallButton(label + (KanButtons.Children.Count == 0 ? " (K)" : string.Empty), () => OnDeclareKan(option), primary: false));
+        }
+
         var hand = _engine.Players[_engine.HumanSeat!.Value].Hand;
         var called = _engine.ForbiddenDiscards.Count > 0;
         YourMoveText.Text = called
@@ -541,6 +591,15 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ShowDora()
+    {
+        DoraTiles.Children.Clear();
+        foreach (var indicator in _engine.DoraIndicators)
+        {
+            DoraTiles.Children.Add(TileView.Create(indicator, 22));
+        }
+    }
+
     private void ShowResult()
     {
         if (!_engine.IsFinished)
@@ -559,6 +618,17 @@ public partial class MainWindow : Window
                 $"discarded by {SeatLabel(result.LoserSeat!.Value)}, on turn {result.Turns}.",
             _ => $"Exhaustive draw: the wall ran out after {result.Turns} turns and nobody won."
         };
+        if (_engine.WinningYaku is { } yaku)
+        {
+            var dora = _engine.WinningDora > 0 ? $" · dora {_engine.WinningDora}" : string.Empty;
+            ResultYaku.Text = $"{yaku} = {yaku.Han} han{dora}";
+            ResultYaku.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ResultYaku.Visibility = Visibility.Collapsed;
+        }
+
         ResultBanner.Visibility = Visibility.Visible;
     }
 
@@ -683,6 +753,14 @@ public partial class MainWindow : Window
                     OnChi(_engine.PendingCall.ChiOptions[0]);
                 }
 
+                e.Handled = true;
+                break;
+            case Key.K when _engine.AwaitingHumanCall && _engine.PendingCall!.CanKan:
+                OnKan();
+                e.Handled = true;
+                break;
+            case Key.K when _engine.AwaitingHumanDiscard && _engine.HumanKanOptions.Count > 0:
+                OnDeclareKan(_engine.HumanKanOptions[0]);
                 e.Handled = true;
                 break;
             case Key.S when _engine.AwaitingHumanCall:
