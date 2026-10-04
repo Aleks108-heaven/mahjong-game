@@ -160,7 +160,13 @@
                 <TextBlock x:Name="SubtitleText" Text="Riichi engine · four bots play one round" FontSize="14" Foreground="{StaticResource MutedBrush}"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <Border Style="{StaticResource Chip}" AutomationProperties.Name="Dora indicators">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" AutomationProperties.Name="Language">
+                    <RadioButton x:Name="LangEn" Content="English" Tag="en" GroupName="Lang" Style="{StaticResource ToggleAction}"
+                                 Padding="12,5" FontSize="13" Margin="0,0,4,0" Checked="Lang_Checked"/>
+                    <RadioButton x:Name="LangUk" Content="Українська" Tag="uk" GroupName="Lang" Style="{StaticResource ToggleAction}"
+                                 Padding="12,5" FontSize="13" IsChecked="True" Checked="Lang_Checked"/>
+                </StackPanel>
+                <Border Style="{StaticResource Chip}" AutomationProperties.Name="Dora indicators" Margin="18,0,0,0">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="DoraLabel" Text="Dora" Foreground="{StaticResource TextBrush}" FontSize="14" FontWeight="SemiBold"
                                    VerticalAlignment="Center"/>
@@ -266,14 +272,7 @@
                                          Padding="2,7" FontSize="12" Checked="Seat_Checked"/>
                         </UniformGrid>
                         <TextBlock x:Name="SeatHint" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap"
-                                   Margin="0,4,0,0" Text="Picking a seat starts a new round. Bots' hands stay hidden."/>
-                        <TextBlock x:Name="LangLabel" Text="LANGUAGE" Style="{StaticResource SectionLabel}" Margin="0,14,0,6"/>
-                        <UniformGrid Columns="2">
-                            <RadioButton x:Name="LangEn" Content="English" Tag="en" GroupName="Lang" Style="{StaticResource ToggleAction}"
-                                         Padding="2,7" FontSize="12" Margin="0,0,3,0" Checked="Lang_Checked"/>
-                            <RadioButton x:Name="LangUk" Content="Українська" Tag="uk" GroupName="Lang" Style="{StaticResource ToggleAction}"
-                                         Padding="2,7" FontSize="12" IsChecked="True" Checked="Lang_Checked"/>
-                        </UniformGrid>
+                                   Margin="0,3,0,0" Text="Picking a seat starts a new round. Bots' hands stay hidden."/>
                         <TextBlock x:Name="SeedLabel" Text="SEED (OPTIONAL)" Style="{StaticResource SectionLabel}" Margin="0,14,0,6"/>
                         <TextBox x:Name="SeedBox" Background="#0F2F24" Foreground="{StaticResource TextBrush}"
                                  CaretBrush="White" BorderBrush="#4C8F76" BorderThickness="1.5" Padding="8,7" FontSize="14"
@@ -288,7 +287,7 @@
 
                     <TextBox x:Name="LogBox" Grid.Row="1" IsReadOnly="True" FontFamily="Consolas" FontSize="11.5"
                              Background="#0F2F24" Foreground="{StaticResource TextBrush}" BorderBrush="#2F7059"
-                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"
+                             MinHeight="150" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"
                              AutomationProperties.Name="Game log"/>
 
                     <TextBlock x:Name="KeysText" Grid.Row="2" Margin="0,12,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12"

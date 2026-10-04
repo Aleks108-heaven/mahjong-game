@@ -122,7 +122,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        SeedHint.Text = Loc.T("Empty = random round. A number replays the same round.");
+        SeedHint.Text = Loc.T("Empty = random round.");
         SeedHint.Foreground = MutedColour;
 
         LogBox.Clear();
@@ -668,18 +668,17 @@ public partial class MainWindow : Window
         }
 
         SeatWatch.ToolTip = Loc.T("Spectate: four bots play");
-        SeatHint.Text = Loc.T("Picking a seat starts a new round. Bots' hands stay hidden.");
-        LangLabel.Text = Loc.T("LANGUAGE");
+        SeatHint.Text = Loc.T("Picking a seat starts a new round.");
         SeedLabel.Text = Loc.T("SEED (OPTIONAL)");
         SeedBox.ToolTip = Loc.T("A whole number replays the same round");
         AutomationProperties.SetName(SeedBox, Loc.T("Seed"));
-        SeedHint.Text = Loc.T("Empty = random round. A number replays the same round.");
+        SeedHint.Text = Loc.T("Empty = random round.");
         SeedHint.Foreground = MutedColour;
         ShowHands.Content = Loc.T("Show all hands");
         LogLabel.Text = Loc.T("GAME LOG");
         AutomationProperties.SetName(LogBox, Loc.T("Game log"));
         AutomationProperties.SetName(SpeedSlider, Loc.T("Auto-play speed"));
-        KeysText.Text = Loc.T("Keys: → next turn · A auto-play · N new round");
+        KeysText.Text = Loc.T("Keys: → next · A auto · N new");
         ResultFooter.Text = Loc.T("Press New round (N) to deal again, or enter a seed to replay a round.");
         SpeedSlider_ValueChanged(SpeedSlider, null!);
 
