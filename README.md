@@ -16,7 +16,7 @@ Open PowerShell (press the Windows key, type `PowerShell`, press Enter). A new t
 cd "C:\path\to\Mahjong Game"
 ```
 
-Change the path if you keep the project somewhere else. Keep the quotes because the folder name has a space. Every command below must be run from this folder, one command at a time. Don't paste the `#` comments.
+Replace the path with the folder where you saved the project. Keep the quotes because the folder name has a space. Every command below must be run from this folder, one command at a time. Don't paste the `#` comments.
 
 ### Step 2: start the game
 
