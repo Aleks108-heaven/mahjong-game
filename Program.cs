@@ -89,7 +89,7 @@ static int RunArena(string[] args)
 
 static bool TryParseLevel(string text, out BotLevel level)
 {
-    return Enum.TryParse(text, ignoreCase: true, out level) && Enum.IsDefined(level);
+    return BotLevels.TryParse(text, out level);
 }
 
 static bool TryParseTable(string text, out BotLevel[] table)

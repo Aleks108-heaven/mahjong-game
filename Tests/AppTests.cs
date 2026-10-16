@@ -207,6 +207,29 @@ public sealed class LocalizationTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("En", Lang.En)]
+    [InlineData("uk", Lang.Uk)]
+    [InlineData("UK", Lang.Uk)]
+    public void LanguageNamesAreRecognisedInAnyCase(string text, Lang expected)
+    {
+        Assert.True(Loc.TryParseLanguage(text, out var language));
+        Assert.Equal(expected, language);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("ua")]
+    [InlineData("english")]
+    [InlineData("0")]
+    [InlineData("1")]
+    [InlineData("99")]
+    public void AnythingElseIsNotALanguage(string? text)
+    {
+        Assert.False(Loc.TryParseLanguage(text, out _));
+    }
+
     [Fact]
     public void TheLevelNamesAreTranslated()
     {

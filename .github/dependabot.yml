@@ -1,0 +1,20 @@
+version: 2
+
+# Pull requests that bump the pinned GitHub Actions (kept as commit SHAs) and the test packages (kept as exact
+# versions with a lock file), so pinning doesn't mean falling behind.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: nuget
+    directory: /Tests
+    schedule:
+      interval: weekly
+    groups:
+      test-packages:
+        patterns: ["*"]

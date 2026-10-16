@@ -77,14 +77,12 @@ public partial class MainWindow : Window
         var numbers = new List<int>();
         for (var i = 0; i < args.Length; i++)
         {
-            if (args[i] == "--level" && i + 1 < args.Length
-                && Enum.TryParse<BotLevel>(args[i + 1], ignoreCase: true, out var level) && Enum.IsDefined(level))
+            if (args[i] == "--level" && i + 1 < args.Length && BotLevels.TryParse(args[i + 1], out var level))
             {
                 SelectLevel(level);
                 i++;
             }
-            else if (args[i] == "--lang" && i + 1 < args.Length
-                     && Enum.TryParse<Lang>(args[i + 1], ignoreCase: true, out var language) && Enum.IsDefined(language))
+            else if (args[i] == "--lang" && i + 1 < args.Length && Loc.TryParseLanguage(args[i + 1], out var language))
             {
                 Loc.Current = language;
                 (language == Lang.En ? LangEn : LangUk).IsChecked = true;

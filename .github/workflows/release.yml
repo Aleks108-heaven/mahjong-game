@@ -1,0 +1,81 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the Windows installer, a portable zip and checksums from a clean
+# checkout, signs build provenance for them, and publishes a GitHub release. See RELEASING.md.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  release:
+    runs-on: windows-2025
+    # Only this job may write: it creates the release and signs the attestation.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Check the tag before building anything
+        shell: pwsh
+        run: |
+          # Only commits on main are released.
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) { throw "Tag $env:GITHUB_REF_NAME is not on main, so it will not be released." }
+
+          # The tag, the version inside the app and the changelog must all agree.
+          $version = ([xml](Get-Content Directory.Build.props -Raw)).SelectSingleNode('/Project/PropertyGroup/Version').InnerText
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw "Tag $env:GITHUB_REF_NAME does not match Version $version in Directory.Build.props." }
+          if (-not (Select-String -Path CHANGELOG.md -Pattern "^## \[$([regex]::Escape($version))\]" -Quiet)) { throw "CHANGELOG.md has no section for $version." }
+          "Releasing $version"
+
+      - name: Restore (locked)
+        run: dotnet restore Tests/TestMahjongGame.Tests.csproj --locked-mode
+
+      - name: Test
+        run: dotnet test Tests/TestMahjongGame.Tests.csproj --no-restore -c Release
+
+      - name: Package (exe, portable zip, installer, checksums)
+        shell: pwsh
+        run: ./tools/package.ps1
+
+      - name: Write the release notes
+        shell: pwsh
+        run: ./tools/release-notes.ps1 -Version ($env:GITHUB_REF_NAME.TrimStart('v')) -Repository $env:GITHUB_REPOSITORY
+      - name: Sign build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            artifacts/MahjongTable-*-Setup.exe
+            artifacts/MahjongTable-*-portable.zip
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          gh release create $env:GITHUB_REF_NAME `
+            "artifacts/MahjongTable-$version-Setup.exe" `
+            "artifacts/MahjongTable-$version-win-x64-portable.zip" `
+            "artifacts/SHA256SUMS.txt" `
+            --verify-tag --title "Mahjong Table $version" --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed.' }

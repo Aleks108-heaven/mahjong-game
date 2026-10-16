@@ -18,6 +18,22 @@ public static class Loc
 
     public static bool IsUkrainian => Current == Lang.Uk;
 
+    // Accepts only the language names En and Uk, in any case. Numbers such as "1" are not languages.
+    public static bool TryParseLanguage(string? text, out Lang language)
+    {
+        foreach (var candidate in Enum.GetValues<Lang>())
+        {
+            if (string.Equals(candidate.ToString(), text, StringComparison.OrdinalIgnoreCase))
+            {
+                language = candidate;
+                return true;
+            }
+        }
+
+        language = default;
+        return false;
+    }
+
     public static string T(string english, params object[] args)
     {
         var text = Current == Lang.Uk && Ukrainian.TryGetValue(english, out var uk) ? uk : english;

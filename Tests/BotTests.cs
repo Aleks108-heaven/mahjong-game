@@ -722,3 +722,33 @@ public class ArenaTests
         Assert.True(senior.DealInRate < junior.DealInRate, $"Senior {senior.DealInRate:P1} vs Junior {junior.DealInRate:P1}");
     }
 }
+
+public class BotLevelNameTests
+{
+    [Theory]
+    [InlineData("junior", BotLevel.Junior)]
+    [InlineData("Middle", BotLevel.Middle)]
+    [InlineData("SENIOR", BotLevel.Senior)]
+    public void NamesAreRecognisedInAnyCase(string text, BotLevel expected)
+    {
+        Assert.True(BotLevels.TryParse(text, out var level));
+        Assert.Equal(expected, level);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("expert")]
+    [InlineData("0")]
+    [InlineData("1")]
+    [InlineData("2")]
+    [InlineData("99")]
+    [InlineData("-1")]
+    [InlineData("Junior,Middle")]
+    [InlineData(" senior")]
+    public void AnythingElseIsNotALevel(string? text)
+    {
+        Assert.False(BotLevels.TryParse(text, out _));
+    }
+}

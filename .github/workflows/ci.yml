@@ -8,18 +8,29 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
+      # --locked-mode fails if a package would resolve differently from packages.lock.json.
       - name: Restore
-        run: dotnet restore Tests/TestMahjongGame.Tests.csproj
+        run: dotnet restore Tests/TestMahjongGame.Tests.csproj --locked-mode
 
       - name: Build
         run: dotnet build Tests/TestMahjongGame.Tests.csproj --no-restore -c Release
@@ -30,14 +41,29 @@ jobs:
       - name: Smoke run (seeded round)
         run: dotnet run --project TestMahjongGame.csproj -c Release -- 7 | tail -n 5
 
-  build-desktop-app:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Smoke run (arena, 40 rounds)
+        run: dotnet run --project TestMahjongGame.csproj -c Release -- arena 40
 
-      - uses: actions/setup-dotnet@v4
+  # Builds the desktop app and runs the same packaging script the release uses, so a broken
+  # installer is caught on an ordinary push and not on release day.
+  windows-app:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
       - name: Build WPF app
         run: dotnet build Wpf/MahjongTable.csproj -c Release
+
+      - name: Package (exe, portable zip, installer, checksums)
+        shell: pwsh
+        run: ./tools/package.ps1
+
+      - name: Show what was built
+        shell: pwsh
+        run: Get-ChildItem artifacts | Select-Object Name, Length
