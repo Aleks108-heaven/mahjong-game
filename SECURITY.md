@@ -4,7 +4,7 @@
 
 Please report security problems privately, using **Report a vulnerability** on the [Security tab](https://github.com/Aleks108-heaven/mahjong-game/security/advisories/new) of this repository, rather than in a public issue. Include the version (shown in the window's footer), what you did and what happened.
 
-Only the latest release is supported.
+Only the latest release is supported. The app carries its own copy of the .NET runtime, so security fixes to .NET reach you by installing a newer release; there is no automatic update.
 
 ## What the app does and doesn't touch
 

@@ -2,13 +2,14 @@
 
 Date: 2026-10-16. Scope: the new bot levels (Junior, Middle, Senior), the desktop app changes, the installer and portable build, and the release process.
 
-**Final status: PARTIALLY VERIFIED.** The engine, the app and the packaging are verified locally with evidence, and the findings below are fixed or documented. Two required parts could only be checked indirectly: the release workflow has not yet run for real (it is first exercised by pushing the `v0.1.0` tag), and only Windows 11 was available. See [What could not be tested](#what-could-not-be-tested).
+**Final status: PASS WITH FINDINGS.** The engine, the app, the packaging and the live release were verified with evidence, and the defects found are fixed. The remaining findings are the missing code signature (S-1), the bundled runtime needing a new release for each .NET security update (S-2), and repository security features that are switched off (S-3). Only Windows 11 was available, so other Windows versions and assistive technology are untested; see [What could not be tested](#what-could-not-be-tested). The first version of this report, written before the release, was PARTIALLY VERIFIED because the release workflow had not run yet; [Post-release verification](#post-release-verification) closes that gap.
 
 ## 1. Executive summary
 
 - **Verified:** 198 automated tests pass; the Middle bot plays exactly as the original (200 seeds byte-identical); the three levels form a measurable ladder; the real app was driven end to end through UI Automation (20 checks, 20 pass); the installer installs, runs and uninstalls cleanly without administrator rights; the app opens no network connections; the history contains no secrets.
 - **Found and fixed during this QA:** four defects (D-1 to D-4 below), the most serious being a packaging script that could not even start in Windows PowerShell 5.1.
-- **Open:** the build is not code-signed (S-1, Medium). Windows SmartScreen will warn on first run. Checksums and signed build provenance are the mitigation.
+- **Open:** the build is not code-signed (S-1, Medium), so Windows SmartScreen will warn on first run; checksums and signed build provenance are the mitigation. The bundled .NET runtime is only as current as the last release (S-2, Low). Repository secret scanning, push protection, Dependabot security updates and code scanning are off (S-3, Low).
+- **Vulnerabilities:** GitHub reports 0 open Dependabot alerts; the NuGet audit finds no vulnerable packages; the release was built on .NET runtime 10.0.13, the latest patch in Microsoft's release data on the day of release.
 
 ## 2. Environment
 
@@ -40,7 +41,7 @@ Date: 2026-10-16. Scope: the new bot levels (Junior, Middle, Senior), the deskto
 | Reliability | Passed | Damaged settings file, failing save, missing file all fall back safely |
 | Concurrency | Passed | The arena plays rounds in parallel; a test repeats a run and gets identical results |
 | Accessibility | Partly tested | Controls expose automation names (UI Automation found and drove them); keyboard focus is visible (screenshots). **Not tested:** screen reader, high contrast, contrast ratios with a tool, high-DPI scaling. |
-| Release process | Partly tested | `actionlint` clean; scripts run locally under 5.1 and 7; a CI-strict build passes locally. The live release run is not yet done. |
+| Release process | Passed | `actionlint` clean; scripts run locally under 5.1 and 7; CI-strict build passes; then the real `v0.1.0` run succeeded and its output was verified (see Post-release verification) |
 
 ### The end-to-end checks (UI Automation against the real exe)
 
@@ -63,12 +64,12 @@ Mapped to `security-checklist.md`.
 
 | Item | Result | Evidence |
 | --- | --- | --- |
-| 1 Patching | **Partly tested** | NuGet audit: no vulnerable packages (direct or transitive). The bundled runtime (10.0.13) was **not** checked against advisories. xunit 2.9.3 is marked "Legacy" (v3 exists); test-only, not shipped (Info). |
+| 1 Patching | Passed, with S-2 | NuGet audit: no vulnerable packages (direct or transitive). GitHub: 0 open Dependabot alerts. The release job installed .NET runtime 10.0.13 and SDK 10.0.402, which Microsoft's release data lists as the latest patch (released 2026-10-13, a security release). Whether that runtime has vulnerabilities not yet published cannot be known. xunit 2.9.3 is marked "Legacy" (v3 exists); test-only, not shipped (Info). |
 | 2 Network exposure | Confirmed none | Running app: 0 TCP and 0 UDP endpoints, no networking DLLs loaded. Source has no `System.Net`, sockets or HTTP. |
 | 3 Authentication | Not applicable | No accounts or secrets. |
 | 4 Privilege | Confirmed | The installer runs with `PrivilegesRequired=lowest` and installed without elevation; the app registers no service. |
 | 5 Persistence | Confirmed | Before, during and after install and uninstall, the startup Run keys, scheduled-task count, service count and Startup folder were identical. The only addition was the per-user uninstall entry, which uninstall removed. |
-| 6 Integrity | **S-1, below** | Files are unsigned. SHA-256 checksums are published; signed provenance is created by the release workflow (not yet verified live). |
+| 6 Integrity | **S-1, below** | Files are unsigned. SHA-256 checksums are published and match the downloaded files; signed build provenance verifies with `gh attestation verify`. |
 | 7 Protection controls | Not applicable to the app | Observed: Windows needs about 7 s to scan the first launch of the new exe. |
 | 8 Secrets | Confirmed none | Pattern scan over all 12 commits (12,092 lines): 0 matches, and the scan detects planted tokens (positive control). No key, certificate or `.env` file is tracked. Workflows use only the built-in `github.token`. |
 | 9 Logging | Not applicable | The game log is gameplay text only. |
@@ -79,6 +80,9 @@ Mapped to `security-checklist.md`.
 | ID | Severity | Confidence | Finding | Fix |
 | --- | --- | --- | --- | --- |
 | S-1 | Medium | Confirmed | The exe and installer are not code-signed, so Windows SmartScreen may show "Windows protected your PC" and users cannot tell who published the file from a signature. | Needs a code-signing certificate. Mitigated by SHA-256 checksums, signed build provenance (`gh attestation verify`) and clear instructions in the release notes and README. |
+
+| S-2 | Low | Confirmed | The exe is self-contained, so it carries its own .NET runtime. That runtime never updates itself: a user keeps the runtime of the release they installed until they install a newer release. | Release a patch version after each .NET security update (they ship monthly); the workflow builds on the latest 10.0.x. Now stated in RELEASING.md and SECURITY.md. |
+| S-3 | Low | Confirmed | On the GitHub repository, secret scanning, push protection, Dependabot security updates and code scanning are disabled (a GitGuardian check does run on pull requests). Private vulnerability reporting is on. | Enable them under Settings > Code security; they are free for public repositories. Not changed by this review because they are repository settings. |
 
 ### Language checks (`language-pitfalls.md`, C# and PowerShell)
 
@@ -112,17 +116,31 @@ Memory and CPU use of the window were not measured.
 
 ## What could not be tested
 
-- The release workflow's live run (first run is the `v0.1.0` tag); the provenance attestation and the downloaded installer are verified after that.
 - Windows 10 or any Windows version other than 11; ARM.
 - Screen readers, high-contrast themes, high-DPI scaling, colour-contrast ratios with a tool.
-- Whether the bundled .NET runtime has open advisories.
+- Whether the bundled .NET runtime has vulnerabilities that are not yet published.
 - Memory use and very long play sessions.
 
 ## What was verified, what failed, what is uncertain
 
 1. **Verified:** the items in sections 3, 5 and 6 marked Passed or Confirmed.
 2. **Failed (and fixed):** D-1 to D-4.
-3. **Uncertain:** the live release run; behaviour on other Windows versions; accessibility with assistive technology.
+3. **Uncertain:** behaviour on other Windows versions; accessibility with assistive technology; unpublished runtime vulnerabilities.
 4. **Could not be tested:** see the list above.
 5. **Evidence:** the test run (198 passed), the log comparison, the UI Automation transcript, the install and uninstall footprint, the network check, the history scan and the screenshots, all produced during this review.
-6. **To check next:** after the tag is pushed, that the release has all three files, the checksums match, `gh attestation verify` passes and the installer installs on a clean machine; then update this report's status.
+6. **To check next:** install on a clean Windows 10 machine and with a screen reader; enable the repository security features (S-3); decide on a code-signing certificate (S-1).
+
+## Post-release verification
+
+Done on 2026-10-16, after pushing the `v0.1.0` tag, from a fresh download of the published release.
+
+| Check | Result |
+| --- | --- |
+| CI on `main` (commit `11428c5`) | Both jobs green: Ubuntu build, tests and smoke runs (the pinned Middle-bot hash also holds on Linux), and the Windows job that ran the packaging script |
+| Release workflow | Every step passed, including the tag check, locked restore, tests, packaging, build provenance and publishing (2 min 35 s) |
+| Release page | `Mahjong Table 0.1.0`, not a draft or pre-release, with `MahjongTable-0.1.0-Setup.exe` (59.8 MB), `MahjongTable-0.1.0-win-x64-portable.zip` (59.5 MB) and `SHA256SUMS.txt`; notes show the changelog, the file guide, the SmartScreen warning and verification steps |
+| Checksums | Both files match `SHA256SUMS.txt` |
+| Provenance | `gh attestation verify` succeeds for both files: issuer GitHub Actions, repository `Aleks108-heaven/mahjong-game`, ref `refs/tags/v0.1.0`, commit `11428c5`, workflow `release.yml`, GitHub-hosted runner |
+| Downloaded installer | Silent install exit 0; installed exe reports 0.1.0; window shows v0.1.0; uninstall exit 0 and leaves no files or uninstall entry |
+| Portable zip | Contains `MahjongTable.exe` and `README.txt`; the exe shows its window after 2.8 s |
+| Dependabot PR #1 (test-package bump) | Its CI is green. It is a routine version bump, not a security fix. Not merged; left for review. |

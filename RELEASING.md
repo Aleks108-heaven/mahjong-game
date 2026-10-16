@@ -42,6 +42,7 @@ This needs the .NET 10 SDK and [Inno Setup 6](https://jrsoftware.org/isinfo.php)
 - **The workflow fails before "Publish the release".** Nothing was published. Fix the problem on `main`, then move the tag: `git push origin :refs/tags/v1.2.3`, `git tag -d v1.2.3`, tag again, push.
 - **A release is out with a defect.** Don't move or delete its tag, because people may already have the files. Fix the problem and release the next patch version.
 - **Updating pinned actions.** Dependabot opens pull requests for the commit SHAs in the workflows and for the test packages; review them like any other change.
+- **A .NET security update ships.** The exe carries its own copy of the .NET runtime, which only changes when someone installs a newer release. After each .NET 10 security release (monthly), bump the patch version, add a changelog entry and release again; the workflow builds on the latest 10.0.x runtime, and the release job log shows which one it used.
 
 ## Not done yet
 

@@ -31,7 +31,7 @@ The releases are built by GitHub Actions from this repository, with signed build
 gh attestation verify .\MahjongTable-0.1.0-Setup.exe --repo Aleks108-heaven/mahjong-game
 ```
 
-To uninstall, use Windows **Settings > Apps**. That also removes the saved settings; the portable build keeps them in `%LOCALAPPDATA%\MahjongTable`, so delete that folder to forget them.
+There is no automatic update: to update, install the newest release over the old one. To uninstall, use Windows **Settings > Apps**. That also removes the saved settings; the portable build keeps them in `%LOCALAPPDATA%\MahjongTable`, so delete that folder to forget them.
 
 ## Choose your opponents
 
