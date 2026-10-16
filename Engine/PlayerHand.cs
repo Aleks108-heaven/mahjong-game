@@ -337,7 +337,7 @@ public sealed class PlayerHand
     }
 
     // Dragons, your own wind and the round wind score a han as a set.
-    private static bool IsValueTile(Tile tile, int seatWind, int roundWind)
+    public static bool IsValueTile(Tile tile, int seatWind, int roundWind)
     {
         return tile.Honor is { } honor && (honor >= Honor.White || (int)honor == seatWind || (int)honor == roundWind);
     }
@@ -361,6 +361,14 @@ public sealed class PlayerHand
     // With preferEdges, terminals and honours go first among equally good discards (for an all-simples plan).
     public Tile DiscardBest(Random rng, IReadOnlyCollection<Tile>? forbidden = null, bool preferEdges = false)
     {
+        var tile = ChooseBestDiscard(rng, forbidden, preferEdges);
+        _tiles.Remove(tile);
+        return tile;
+    }
+
+    // Same choice as DiscardBest, but the hand is left untouched (bots decide first, the engine then discards).
+    public Tile ChooseBestDiscard(Random rng, IReadOnlyCollection<Tile>? forbidden = null, bool preferEdges = false)
+    {
         var best = BestDiscardKinds(forbidden);
         if (preferEdges)
         {
@@ -372,9 +380,13 @@ public sealed class PlayerHand
         }
 
         var chosen = best[rng.Next(best.Count)];
-        var tile = _tiles.First(t => t.ToTileIndex() == chosen);
-        _tiles.Remove(tile);
-        return tile;
+        return _tiles.First(t => t.ToTileIndex() == chosen);
+    }
+
+    // How many of each of the 34 tile kinds the concealed hand holds (a fresh copy, safe to change).
+    public int[] TileCounts()
+    {
+        return ToTileCounts();
     }
 
     // Every distinct tile whose discard leaves the lowest shanten (used for hints).

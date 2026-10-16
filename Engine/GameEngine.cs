@@ -22,6 +22,7 @@ public sealed class GameEngine
 
     private readonly Random _rng;
     private readonly TextWriter _output;
+    private readonly IBotBrain[] _brains;
     private readonly List<Player> _players = new();
     private readonly List<Tile> _discards = new();
     private List<Tile> _forbidden = new();
@@ -105,15 +106,49 @@ public sealed class GameEngine
     private bool CanKanNow => _started && KanCount < MaxKans && _wall.LiveCount > 0 && _wall.ReplacementsLeft > 0;
 
     // Pass a seed to make a round reproducible; pass a writer to capture or redirect output.
-    public GameEngine(int? seed = null, TextWriter? output = null)
+    // botLevel is how well every computer player plays (Middle is the original bot).
+    public GameEngine(int? seed = null, TextWriter? output = null, BotLevel botLevel = BotLevel.Middle)
+        : this(seed, output, new[] { botLevel, botLevel, botLevel, botLevel })
     {
+    }
+
+    // One level per seat (indexed by seat), so strong and weak bots can share a table. A human seat's level is unused.
+    public GameEngine(int? seed, TextWriter? output, IReadOnlyList<BotLevel> seatLevels)
+    {
+        ArgumentNullException.ThrowIfNull(seatLevels);
+        if (seatLevels.Count != 4)
+        {
+            throw new ArgumentException("Give one bot level for each of the four seats.", nameof(seatLevels));
+        }
+
         _rng = seed.HasValue ? new Random(seed.Value) : new Random();
         _output = output ?? Console.Out;
+        _brains = seatLevels.Select(BotBrains.For).ToArray();
     }
 
     public static string WindName(int seat)
     {
         return SeatWinds[seat];
+    }
+
+    // How well the computer player in this seat plays.
+    public BotLevel LevelOf(int seat)
+    {
+        return _brains[seat].Level;
+    }
+
+    // What the player in this seat can see: their own hand and the public table, nothing hidden.
+    public TableView ViewFor(int seat)
+    {
+        if (!_started)
+        {
+            throw new InvalidOperationException("Call StartRound() first.");
+        }
+
+        var seats = _players
+            .Select(p => new SeatInfo(p.Seat, p.Discards, p.Thrown, p.Hand.Melds))
+            .ToList();
+        return new TableView(seat, _players[seat].Hand, seats, DoraIndicators, RoundWind, WallRemaining, CanKanNow, _forbidden);
     }
 
     public RoundResult RunSimulation()
@@ -381,10 +416,14 @@ public sealed class GameEngine
                     return;
                 }
 
-                CommitDiscard(player, player.Hand.DiscardBest(
-                    _rng,
-                    _forbidden,
-                    preferEdges: player.Hand.IsPlayingForSimples(player.Seat, RoundWind)));
+                var chosen = _brains[player.Seat].ChooseDiscard(ViewFor(player.Seat), _rng);
+                if (!player.Hand.Tiles.Contains(chosen) || !IsDiscardAllowed(chosen))
+                {
+                    throw new InvalidOperationException($"{Label(player)} chose an illegal discard: {chosen}.");
+                }
+
+                player.Hand.Remove(chosen);
+                CommitDiscard(player, chosen);
                 break;
 
             case TurnState.WaitPhase:
@@ -553,24 +592,19 @@ public sealed class GameEngine
 
         var chiOptions = _players[chiSeat].Hand.ChiOptions(tile);
 
-        // 1. A bot that can kan or pon does so when it helps and a yaku stays possible.
+        // 1. A bot that can kan or pon does so when its brain says it helps.
         if (ponSeat is int ps && ps != HumanSeat)
         {
-            var hand = _players[ps].Hand;
-            var current = hand.GetShanten();
-            var sameFour = new[] { tile, tile, tile, tile };
+            var brain = _brains[ps];
+            var view = ViewFor(ps);
 
-            if (CanKanNow
-                && hand.CanDaiminkan(tile)
-                && hand.ShantenAfterDaiminkan(tile) <= current
-                && hand.OpenCallKeepsAYaku(sameFour, new[] { tile, tile, tile }, true, ps, RoundWind))
+            if (CanKanNow && _players[ps].Hand.CanDaiminkan(tile) && brain.WantsOpenKan(view, tile))
             {
                 ExecuteCall(_players[ps], MeldType.Daiminkan, null);
                 return true;
             }
 
-            if (hand.ShantenAfterPon(tile) < current
-                && hand.OpenCallKeepsAYaku(new[] { tile, tile, tile }, new[] { tile, tile }, true, ps, RoundWind))
+            if (brain.WantsPon(view, tile))
             {
                 ExecuteCall(_players[ps], MeldType.Pon, null);
                 return true;
@@ -591,17 +625,18 @@ public sealed class GameEngine
             }
         }
 
-        // 3. Otherwise the next bot in turn order may chi, picking the option that helps most.
+        // 3. Otherwise the next bot in turn order may chi, with the run its brain prefers.
         if (chiSeat != HumanSeat && chiOptions.Count > 0)
         {
-            var hand = _players[chiSeat].Hand;
-            var current = hand.GetShanten();
-            var best = chiOptions.OrderBy(option => hand.ShantenAfterChi(tile, option)).First();
-            var run = new[] { tile, best.A, best.B }.OrderBy(t => t).ToList();
-            if (hand.ShantenAfterChi(tile, best) < current
-                && hand.OpenCallKeepsAYaku(run, new[] { best.A, best.B }, false, chiSeat, RoundWind))
+            var chosen = _brains[chiSeat].ChooseChi(ViewFor(chiSeat), tile, chiOptions);
+            if (chosen is not null)
             {
-                ExecuteCall(_players[chiSeat], MeldType.Chi, best);
+                if (!chiOptions.Contains(chosen))
+                {
+                    throw new InvalidOperationException($"{Label(_players[chiSeat])} chose a run it can't make.");
+                }
+
+                ExecuteCall(_players[chiSeat], MeldType.Chi, chosen);
                 return true;
             }
         }
@@ -651,7 +686,7 @@ public sealed class GameEngine
         _state = TurnState.Discard;
     }
 
-    // A bot declares a closed or added kan when it doesn't make the hand worse. Returns true if one was declared.
+    // A bot declares a closed or added kan when its brain wants one. Returns true if one was declared.
     private bool TryBotKan(Player player)
     {
         if (!CanKanNow)
@@ -659,24 +694,25 @@ public sealed class GameEngine
             return false;
         }
 
-        var hand = player.Hand;
-        var options = hand.KanOptions();
+        var options = player.Hand.KanOptions();
         if (options.Count == 0)
         {
             return false;
         }
 
-        var current = hand.BestDiscardShanten();
-        foreach (var option in options)
+        var chosen = _brains[player.Seat].ChooseSelfKan(ViewFor(player.Seat));
+        if (chosen is null)
         {
-            if (hand.ShantenAfterKan(option) <= current)
-            {
-                DeclareKan(player, option);
-                return true;
-            }
+            return false;
         }
 
-        return false;
+        if (!options.Contains(chosen))
+        {
+            throw new InvalidOperationException($"{Label(player)} chose a kan it can't make.");
+        }
+
+        DeclareKan(player, chosen);
+        return true;
     }
 
     // Declares a closed or added kan for the player whose turn it is. Returns true if the round ended because
