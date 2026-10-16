@@ -1,0 +1,19 @@
+<Project>
+
+  <!-- Shared by the engine, the desktop app and the tests. The release workflow checks that a release tag matches Version. -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Product>Mahjong Table</Product>
+    <Authors>Aleks108-heaven</Authors>
+    <Description>Riichi mahjong for Windows with computer opponents from Junior to Senior.</Description>
+    <RepositoryUrl>https://github.com/Aleks108-heaven/mahjong-game</RepositoryUrl>
+  </PropertyGroup>
+
+  <!-- On GitHub Actions: reproducible builds, and a warning fails the build. NuGet vulnerability notices stay warnings. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+  </PropertyGroup>
+
+</Project>

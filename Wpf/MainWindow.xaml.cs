@@ -54,34 +54,67 @@ public partial class MainWindow : Window
             PlayerGrid.Children.Add(panel.Root);
         }
 
+        // Pick up where the last session left off. No round exists yet, so none of these changes start one.
+        var saved = UserSettings.Load();
+        Loc.Current = saved.Language;
+        (saved.Language == Lang.En ? LangEn : LangUk).IsChecked = true;
+        SelectLevel(saved.Level);
+        SelectSeat(saved.Seat);
+
+        VersionText.Text = "v" + AppInfo.Version;
         ApplyLanguage();
         _timer.Interval = TimeSpan.FromMilliseconds(SpeedSlider.Value);
         _timer.Tick += (_, _) => OnTimerTick();
         Loaded += (_, _) => StartFromCommandLine();
     }
 
-    // Optional developer arguments: MahjongTable.exe <seed> [turns-to-play]
+    // Optional developer arguments: MahjongTable.exe [seed] [turns-to-play] [--level junior|middle|senior] [--lang en|uk]
     // With a turns argument the app starts as a spectator and plays that many turns first.
+    // None of these are saved as settings.
     private void StartFromCommandLine()
     {
-        var args = Environment.GetCommandLineArgs();
-        if (args.Length > 1 && int.TryParse(args[1], out _))
+        var args = Environment.GetCommandLineArgs().Skip(1).ToArray();
+        var numbers = new List<int>();
+        for (var i = 0; i < args.Length; i++)
         {
-            SeedBox.Text = args[1];
+            if (args[i] == "--level" && i + 1 < args.Length
+                && Enum.TryParse<BotLevel>(args[i + 1], ignoreCase: true, out var level) && Enum.IsDefined(level))
+            {
+                SelectLevel(level);
+                i++;
+            }
+            else if (args[i] == "--lang" && i + 1 < args.Length
+                     && Enum.TryParse<Lang>(args[i + 1], ignoreCase: true, out var language) && Enum.IsDefined(language))
+            {
+                Loc.Current = language;
+                (language == Lang.En ? LangEn : LangUk).IsChecked = true;
+                ApplyLanguage();
+                i++;
+            }
+            else if (int.TryParse(args[i], out var number))
+            {
+                numbers.Add(number);
+            }
         }
 
-        var hasTurns = args.Length > 2 && int.TryParse(args[2], out _);
+        if (numbers.Count > 0)
+        {
+            SeedBox.Text = numbers[0].ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        var hasTurns = numbers.Count > 1;
         if (hasTurns)
         {
             SeatWatch.IsChecked = true;
         }
 
         _ready = true;
+        UpdateLevelDescription();
         NewRound();
 
-        if (hasTurns && int.TryParse(args[2], out var turns))
+        if (hasTurns)
         {
-            for (var i = 0; i < turns && !_engine.IsFinished; i++)
+            for (var i = 0; i < numbers[1] && !_engine.IsFinished; i++)
             {
                 _engine.PlayTurn();
             }
@@ -104,6 +137,55 @@ public partial class MainWindow : Window
         return null;
     }
 
+    private BotLevel SelectedLevel()
+    {
+        foreach (RadioButton radio in LevelPicker.Children)
+        {
+            if (radio.IsChecked == true)
+            {
+                return Enum.Parse<BotLevel>((string)radio.Tag);
+            }
+        }
+
+        return UserSettings.Default.Level;
+    }
+
+    private void SelectLevel(BotLevel level)
+    {
+        foreach (RadioButton radio in LevelPicker.Children)
+        {
+            radio.IsChecked = (string)radio.Tag == level.ToString();
+        }
+    }
+
+    private void SelectSeat(int seat)
+    {
+        foreach (RadioButton radio in SeatPicker.Children)
+        {
+            radio.IsChecked = (string)radio.Tag == seat.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+    }
+
+    private void SaveSettings()
+    {
+        new UserSettings(Loc.Current, SelectedLevel(), SelectedSeat() ?? -1).Save();
+    }
+
+    private void UpdateLevelDescription()
+    {
+        LevelDescription.Text = Loc.T(SelectedLevel() switch
+        {
+            BotLevel.Junior => "Learning the game. Slips up on about one discard in five, rarely calls and never defends.",
+            BotLevel.Middle => "A solid club player. Plays the fastest hand, calls when it helps and keeps a yaku in reach.",
+            _ => "A strong player. Counts the tiles on the table, builds hands that can really win and folds against open hands."
+        });
+    }
+
+    private static string LevelName(BotLevel level)
+    {
+        return Loc.T(level.ToString());
+    }
+
     private void NewRound()
     {
         _timer.Stop();
@@ -118,16 +200,16 @@ public partial class MainWindow : Window
         {
             SeedHint.Text = Loc.T("Seed must be a whole number, for example 7.");
             SeedHint.Foreground = ErrorColour;
+            SeedHint.Visibility = Visibility.Visible;
             SeedBox.Focus();
             return;
         }
 
-        SeedHint.Text = Loc.T("Empty = random round.");
-        SeedHint.Foreground = MutedColour;
+        SeedHint.Visibility = Visibility.Collapsed;
 
         LogBox.Clear();
         _showHint = false;
-        _engine = new GameEngine(_seed, TextWriter.Null);
+        _engine = new GameEngine(_seed, TextWriter.Null, SelectedLevel());
         _engine.Logged += line =>
         {
             LogBox.AppendText(line + Environment.NewLine);
@@ -305,7 +387,8 @@ public partial class MainWindow : Window
             var drawnIndex = canClick ? FindLastIndex(player.Hand.Tiles, _engine.LastDrawnTile!) : -1;
             var hints = canClick && _showHint ? _engine.SuggestHumanDiscards() : new List<Tile>();
 
-            panel.Title.Text = Loc.T("Player {0} · {1}", panel.Seat + 1, SeatName(panel.Seat)) + (isYou ? Loc.T(" · You") : string.Empty);
+            panel.Title.Text = Loc.T("Player {0} · {1}", panel.Seat + 1, SeatName(panel.Seat))
+                + (isYou ? Loc.T(" · You") : Loc.T(" · {0} bot", LevelName(_engine.LevelOf(panel.Seat))));
 
             panel.Hand.Children.Clear();
             for (var i = 0; i < player.Hand.Tiles.Count; i++)
@@ -373,9 +456,18 @@ public partial class MainWindow : Window
         }
 
         var spectating = human is null;
+        PlaybackButtons.Visibility = spectating ? Visibility.Visible : Visibility.Collapsed;
         NextButton.IsEnabled = !finished && spectating;
         AutoButton.IsEnabled = !finished && spectating;
         SpeedLabel.Text = Loc.T(spectating ? "Speed: {0} ms per turn" : "Speed: {0} ms per bot turn", (int)SpeedSlider.Value);
+
+        var botLevel = LevelName(_engine.LevelOf(human == 0 ? 1 : 0));
+        SubtitleText.Text = spectating
+            ? Loc.T("Riichi mahjong · four {0} bots play", botLevel)
+            : Loc.T("Riichi mahjong · you against three {0} bots", botLevel);
+        KeysText.Text = spectating
+            ? Loc.T("Keys: → next turn · A auto · N new round")
+            : Loc.T("Keys: H hint · P pon · C chi · K kan · S pass · N new round");
 
         ShowTurnBanner(awaiting);
         ShowCallBanner(awaitingCall);
@@ -607,6 +699,11 @@ public partial class MainWindow : Window
         }
 
         var result = _engine.Result!;
+        ResultHeadline.Text = result.Outcome == RoundOutcome.ExhaustiveDraw
+            ? Loc.T("Draw")
+            : HumanSeat is { } you && you == result.WinnerSeat
+                ? Loc.T("You win!")
+                : Loc.T("Round over");
         ResultText.Text = result.Outcome switch
         {
             RoundOutcome.Tsumo =>
@@ -647,11 +744,19 @@ public partial class MainWindow : Window
     {
         Title = Loc.T("Mahjong Table");
         TitleText.Text = Loc.T("Mahjong Table");
-        SubtitleText.Text = Loc.T("Riichi engine · four bots play one round");
         DoraLabel.Text = Loc.T("Dora");
+        LevelLabel.Text = Loc.T("OPPONENTS");
+        AutomationProperties.SetName(LevelPicker, Loc.T("Opponent level"));
+        LevelPicker.ToolTip = Loc.T("Changing the level starts a new round.");
+        foreach (RadioButton radio in LevelPicker.Children)
+        {
+            radio.Content = LevelName(Enum.Parse<BotLevel>((string)radio.Tag));
+        }
+
+        UpdateLevelDescription();
+        SeedWatermark.Text = Loc.T("random");
         HintButton.Content = Loc.T("Hint (H)");
         HintButton.ToolTip = Loc.T("Show the discard that keeps you closest to winning");
-        ControlsLabel.Text = Loc.T("CONTROLS");
         NextButton.Content = Loc.T("Next turn  ▶");
         NextButton.ToolTip = Loc.T("Play one full turn (Right arrow)");
         AutoButton.Content = Loc.T("Auto-play");
@@ -668,17 +773,15 @@ public partial class MainWindow : Window
         }
 
         SeatWatch.ToolTip = Loc.T("Spectate: four bots play");
-        SeatHint.Text = Loc.T("Picking a seat starts a new round.");
-        SeedLabel.Text = Loc.T("SEED (OPTIONAL)");
-        SeedBox.ToolTip = Loc.T("A whole number replays the same round");
+        SeatPicker.ToolTip = Loc.T("Picking a seat starts a new round.");
+        SeedLabel.Text = Loc.T("SEED");
+        SeedBox.ToolTip = Loc.T("Empty = random round. A whole number replays the same round.");
         AutomationProperties.SetName(SeedBox, Loc.T("Seed"));
-        SeedHint.Text = Loc.T("Empty = random round.");
-        SeedHint.Foreground = MutedColour;
+        SeedHint.Visibility = Visibility.Collapsed;
         ShowHands.Content = Loc.T("Show all hands");
         LogLabel.Text = Loc.T("GAME LOG");
         AutomationProperties.SetName(LogBox, Loc.T("Game log"));
         AutomationProperties.SetName(SpeedSlider, Loc.T("Auto-play speed"));
-        KeysText.Text = Loc.T("Keys: → next · A auto · N new");
         ResultFooter.Text = Loc.T("Press New round (N) to deal again, or enter a seed to replay a round.");
         SpeedSlider_ValueChanged(SpeedSlider, null!);
 
@@ -703,6 +806,24 @@ public partial class MainWindow : Window
 
         Loc.Current = wanted;
         ApplyLanguage();
+        SaveSettings();
+    }
+
+    private void Level_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_ready)
+        {
+            return;
+        }
+
+        UpdateLevelDescription();
+        SaveSettings();
+        NewRound();
+    }
+
+    private void SeedBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        SeedWatermark.Visibility = SeedBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
     private static int FindLastIndex(IReadOnlyList<Tile> tiles, Tile tile)
     {
@@ -747,6 +868,7 @@ public partial class MainWindow : Window
     {
         if (_ready)
         {
+            SaveSettings();
             NewRound();
         }
     }

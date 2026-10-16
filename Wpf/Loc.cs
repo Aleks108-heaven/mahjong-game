@@ -42,11 +42,9 @@ public static class Loc
     {
         // Static window text
         ["Mahjong Table"] = "Стіл маджонгу",
-        ["Riichi engine · four bots play one round"] = "Рушій ріічі-маджонгу · чотири боти грають один раунд",
         ["Dora"] = "Дора",
         ["Hint (H)"] = "Підказка (H)",
         ["Show the discard that keeps you closest to winning"] = "Показати скид, що тримає вас найближче до перемоги",
-        ["CONTROLS"] = "КЕРУВАННЯ",
         ["Next turn  ▶"] = "Наступний хід  ▶",
         ["Play one full turn (Right arrow)"] = "Розіграти один повний хід (стрілка вправо)",
         ["Auto-play"] = "Автогра",
@@ -58,17 +56,35 @@ public static class Loc
         ["Spectate: four bots play"] = "Спостерігати: грають чотири боти",
         ["Picking a seat starts a new round."] = "Вибір місця починає новий раунд.",
         ["Language"] = "Мова",
-        ["SEED (OPTIONAL)"] = "SEED (НЕОБОВ'ЯЗКОВО)",
+        ["SEED"] = "SEED",
         ["Seed"] = "Seed",
-        ["A whole number replays the same round"] = "Ціле число повторює той самий раунд",
+        ["random"] = "випадковий",
+        ["Empty = random round. A whole number replays the same round."] = "Порожньо = випадковий раунд. Ціле число повторює той самий раунд.",
         ["Seed must be a whole number, for example 7."] = "Seed має бути цілим числом, наприклад 7.",
-        ["Empty = random round."] = "Порожньо = випадковий раунд.",
         ["Show all hands"] = "Показати всі руки",
         ["GAME LOG"] = "ЖУРНАЛ ГРИ",
         ["Game log"] = "Журнал гри",
         ["Auto-play speed"] = "Швидкість автогри",
-        ["Keys: → next · A auto · N new"] = "Клавіші: → далі · A авто · N новий",
+        ["Keys: → next turn · A auto · N new round"] = "Клавіші: → наступний хід · A автогра · N новий раунд",
+        ["Keys: H hint · P pon · C chi · K kan · S pass · N new round"] = "Клавіші: H підказка · P пон · C чі · K кан · S пас · N новий раунд",
         ["Press New round (N) to deal again, or enter a seed to replay a round."] = "Натисніть «Новий раунд» (N), щоб роздати знову, або введіть seed, щоб повторити раунд.",
+
+        // Opponent level
+        ["Junior"] = "Джуніор",
+        ["Middle"] = "Мідл",
+        ["Senior"] = "Сеніор",
+        ["OPPONENTS"] = "СУПЕРНИКИ",
+        ["Opponent level"] = "Рівень суперників",
+        ["Changing the level starts a new round."] = "Зміна рівня починає новий раунд.",
+        ["Learning the game. Slips up on about one discard in five, rarely calls and never defends."] =
+            "Вчиться грати. Помиляється приблизно в кожному п'ятому скиді, рідко закликає й не захищається.",
+        ["A solid club player. Plays the fastest hand, calls when it helps and keeps a yaku in reach."] =
+            "Упевнений клубний гравець. Збирає найшвидшу руку, закликає, коли це допомагає, і тримає яку в зоні досяжності.",
+        ["A strong player. Counts the tiles on the table, builds hands that can really win and folds against open hands."] =
+            "Сильний гравець. Враховує плитки на столі, збирає руки, які справді можуть виграти, і грає в захист проти відкритих рук.",
+        [" · {0} bot"] = " · бот {0}",
+        ["Riichi mahjong · four {0} bots play"] = "Ріічі-маджонг · грають чотири боти: {0}",
+        ["Riichi mahjong · you against three {0} bots"] = "Ріічі-маджонг · ви проти трьох ботів: {0}",
 
         // Header and panels
         ["Turn {0}"] = "Хід {0}",
@@ -149,6 +165,9 @@ public static class Loc
             "Синя рамка = щойно витягнута плитка. Наведіть на плитку, щоб побачити результат. Tab і Enter теж працюють.",
 
         // Result
+        ["Draw"] = "Нічия",
+        ["You win!"] = "Ви перемогли!",
+        ["Round over"] = "Раунд завершено",
         ["{0} wins by tsumo (self-drawn) on turn {1}."] = "{0} перемагає цумо (власний добір) на ході {1}.",
         ["{0} wins by ron on {1}, discarded by {2}, on turn {3}."] = "{0} перемагає роном на {1}, скинуту гравцем {2}, на ході {3}.",
         ["Exhaustive draw: the wall ran out after {0} turns and nobody won."] = "Нічия: стіна закінчилася після {0} ходів, ніхто не виграв.",
